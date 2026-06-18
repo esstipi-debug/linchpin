@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from src.demand_variability import DistributionKind, safety_stock_risk_period
 from src.eoq import EOQResult, compute_eoq
 from src.risk_period import demand_over_risk_period
 from src.safety_stock import SafetyStockResult, service_level_factor
@@ -36,6 +37,8 @@ def continuous_review_sq(
     cycle_service_level: float,
     periods_per_year: float = 52.0,
     lead_time_std: float = 0.0,
+    demand_distribution: DistributionKind = "normal",
+    observed_skewness: float | None = None,
 ) -> PolicyResult:
     """
     Continuous review (s, Q) policy (Sections 5.1.1, 6.3.2).
@@ -51,13 +54,15 @@ def continuous_review_sq(
         review_period=0.0,
     )
     z = service_level_factor(cycle_service_level)
-    ss_value = z * risk.demand_std
-    ss = SafetyStockResult(
-        safety_stock=ss_value,
-        service_level_factor=z,
-        cycle_service_level=cycle_service_level,
-        risk_periods=risk.risk_periods,
+    ss = safety_stock_risk_period(
+        risk.mean_demand,
+        risk.demand_std,
+        cycle_service_level,
+        risk.risk_periods,
+        distribution=demand_distribution,
+        observed_skewness=observed_skewness,
     )
+    ss_value = ss.safety_stock
 
     reorder_point = risk.mean_demand + ss_value
 
@@ -86,6 +91,8 @@ def periodic_review_rs(
     review_period: float,
     cycle_service_level: float,
     lead_time_std: float = 0.0,
+    demand_distribution: DistributionKind = "normal",
+    observed_skewness: float | None = None,
 ) -> PolicyResult:
     """
     Periodic review (R, S) policy (Sections 5.1.2, 6.3.3).
@@ -101,13 +108,15 @@ def periodic_review_rs(
         review_period=review_period,
     )
     z = service_level_factor(cycle_service_level)
-    ss_value = z * risk.demand_std
-    ss = SafetyStockResult(
-        safety_stock=ss_value,
-        service_level_factor=z,
-        cycle_service_level=cycle_service_level,
-        risk_periods=risk.risk_periods,
+    ss = safety_stock_risk_period(
+        risk.mean_demand,
+        risk.demand_std,
+        cycle_service_level,
+        risk.risk_periods,
+        distribution=demand_distribution,
+        observed_skewness=observed_skewness,
     )
+    ss_value = ss.safety_stock
 
     order_up_to = risk.mean_demand + ss_value
 

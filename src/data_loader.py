@@ -1,11 +1,37 @@
-"""Load demand history and compute per-period statistics."""
+"""Load demand history and product metadata from CSV."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
+
+@dataclass(frozen=True)
+class ProductMetadata:
+    product_id: str
+    mean_demand_per_period: float
+    demand_std_per_period: float
+    periods: int
+    mean_unit_cost: float
+    lead_time_periods: float
+    lead_time_std_periods: float = 0.0
+
+
+def load_demand_frame(path: str | Path) -> pd.DataFrame:
+    """Load full demand CSV sorted by date."""
+    df = pd.read_csv(path, parse_dates=["date"])
+    required = {"date", "product_id", "quantity"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"missing columns: {missing}")
+    return df.sort_values(["product_id", "date"])
+
+
+def list_products(path: str | Path) -> list[str]:
+    return sorted(load_demand_frame(path)["product_id"].unique().tolist())
 
 
 def load_demand_csv(
@@ -17,13 +43,54 @@ def load_demand_csv(
     product_col: str = "product_id",
 ) -> pd.Series:
     """Return a time-ordered demand series for one SKU."""
-    df = pd.read_csv(path, parse_dates=[date_col])
+    df = load_demand_frame(path)
     if product_id is not None:
         df = df[df[product_col] == product_id]
     if df.empty:
         raise ValueError(f"no rows for product_id={product_id!r}")
-    df = df.sort_values(date_col)
     return df[quantity_col].astype(float)
+
+
+def product_metadata(
+    path: str | Path,
+    product_id: str,
+    *,
+    periods_per_year: float = 52.0,
+    default_lead_time_periods: float = 2.0,
+) -> ProductMetadata:
+    """
+    Demand stats plus unit_cost and lead_time from CSV when present.
+
+    lead_time_days is converted to periods via periods_per_year / 365.
+    """
+    df = load_demand_frame(path)
+    sku = df[df["product_id"] == product_id]
+    if sku.empty:
+        raise ValueError(f"no rows for product_id={product_id!r}")
+
+    values = sku["quantity"].astype(float).to_numpy()
+    mu = float(np.mean(values))
+    sigma = float(np.std(values, ddof=1)) if len(values) > 1 else 0.0
+
+    if "unit_cost" in sku.columns:
+        unit_cost = float(sku["unit_cost"].astype(float).mean())
+    else:
+        unit_cost = 1.0
+
+    if "lead_time_days" in sku.columns:
+        lt_days = float(sku["lead_time_days"].astype(float).median())
+        lt_periods = lt_days * periods_per_year / 365.0
+    else:
+        lt_periods = default_lead_time_periods
+
+    return ProductMetadata(
+        product_id=product_id,
+        mean_demand_per_period=mu,
+        demand_std_per_period=sigma,
+        periods=len(values),
+        mean_unit_cost=unit_cost,
+        lead_time_periods=lt_periods,
+    )
 
 
 def demand_stats(series: pd.Series) -> dict[str, float]:

@@ -3,6 +3,7 @@
 Python implementation of inventory models from **Nicolas Vandeput**, *Inventory Optimization: Models and Simulations* (De Gruyter, 2020).
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Tests](https://github.com/esstipi-debug/supply-chain-optimization/actions/workflows/tests.yml/badge.svg)](https://github.com/esstipi-debug/supply-chain-optimization/actions/workflows/tests.yml)
 
 This repository turns the book’s models into runnable code: EOQ, safety stock, inventory policies `(s,Q)` and `(R,S)`, and discrete-period simulations to validate cycle service levels.
 
@@ -26,7 +27,13 @@ python examples/run_part3.py
 # Gamma, GSM, newsvendor, KDE, simulation optimization (Ch. 9-13)
 python examples/run_part4.py
 
-# Full pipeline + optional CSV export for Excel
+# All SKUs in one CSV
+python examples/run_batch.py
+
+# Demand chart vs policy levels
+python examples/plot_inventory.py --product SKU-A
+
+# Full pipeline + exports
 python examples/run_complete.py --simulate --export output/summary.csv --excel excel-templates/analysis.xlsx
 
 # Pre-built workbook template
@@ -46,9 +53,9 @@ Expected output includes `Q*`, reorder point `s`, order-up-to level `S`, safety 
 | Book section | Module | Status |
 |--------------|--------|--------|
 | Ch. 1 — Inventory policies | `src/policies.py` | `(s,Q)`, `(R,S)` |
-| Ch. 2 — EOQ | `src/eoq.py` | ✅ |
-| Ch. 3 — Lead time & review period | `src/eoq.py`, `src/policies.py` | ✅ power-of-2 rounding |
-| Ch. 4 — Safety stock | `src/safety_stock.py` | ✅ normal demand |
+| Ch. 2 — EOQ + volume discounts | `src/eoq.py` | ✅ §2.5.3 |
+| Ch. 3 — Lead time & review period | `src/data_loader.py`, `src/eoq.py` | ✅ CSV + power-of-2 |
+| Ch. 4 — Safety stock | `src/safety_stock.py`, `src/demand_variability.py` | ✅ normal + gamma |
 | Ch. 5 — Simulation | `src/simulation.py` | ✅ backorders + lost sales |
 | Ch. 6 — Stochastic lead time | `src/risk_period.py`, `src/policies.py` | ✅ |
 | Ch. 7 — Fill rate | `src/fill_rate.py` | ✅ |
@@ -57,19 +64,24 @@ Expected output includes `Q*`, reorder point `s`, order-up-to level `S`, safety 
 | Ch. 10 — Multi-echelon GSM | `src/multi_echelon.py` | ✅ allocation + simulation |
 | Ch. 11 — Newsvendor | `src/newsvendor.py` | ✅ |
 | Ch. 12 — Histograms / KDE | `src/discrete_demand.py` | ✅ |
-| Ch. 13 — Simulation optimization | `src/simulation_opt.py` | ✅ |
-| Excel / Power BI | `excel-templates/`, `power-bi/` | ✅ `.xlsx` + CSV dataset |
+| Ch. 13 — Simulation optimization | `src/simulation_opt.py` | ✅ grid R + Ss |
+| Batch multi-SKU | `src/batch.py` | ✅ |
+| Export | `excel_export`, `powerbi_export` | ✅ |
 
 ---
 
 ## Project layout
 
 ```
-src/                  Core models (EOQ, safety stock, policies, simulation)
-data/                 Sample demand CSV
-examples/             Runnable workflows
-tests/                Unit tests aligned with book examples
-documentation/        Guides mapped to book chapters
+src/                  Core models (EOQ → simulation optimization)
+examples/             CLI workflows (part1-4, batch, complete, plots)
+tests/                45+ tests with book numeric examples
+data/                 Sample demand (SKU-A, SKU-B)
+documentation/        Guides, FAQ, methodology
+excel-templates/      Generated .xlsx workbooks
+power-bi/             CSV dataset + M queries + DAX + SETUP.md
+.cursor/skills/       Agent skills (Cursor / Claude Code)
+.github/workflows/    CI (pytest on 3.11–3.13)
 ```
 
 ---
@@ -138,11 +150,11 @@ Ss = z_alpha * sigma_d * sqrt(tau)
 
 ---
 
-## Roadmap
+## Future extensions
 
-1. **Power BI `.pbix` template** — build report locally; dataset CSVs provided
-2. **GSM simulation** — `simulate_serial_gsm` with echelon backorders (§10.5) ✅
-3. **Lost sales** — `(R,S)` and `(s,Q)` with `lost_sales=True` (§5.3.2) ✅
+- General supply networks (beyond serial GSM)
+- Policies driven end-to-end from KDE/discrete PMF (Ch. 12 → 5)
+- σ_e integration from forecast error (companion forecasting book)
 
 ## Agent skills (Cursor + Claude Code)
 

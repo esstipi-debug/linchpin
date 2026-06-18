@@ -9,7 +9,12 @@ from typing import Any
 import pandas as pd
 
 from src.cost_optimization import optimize_rs_policy, optimize_sq_policy
-from src.data_loader import annualize_demand, demand_stats, load_demand_csv
+from src.data_loader import (
+    annualize_demand,
+    list_products,
+    load_demand_csv,
+    product_metadata,
+)
 from src.distributions import safety_stock_gamma, select_distribution
 from src.eoq import compute_eoq, round_review_period_power_of_two
 from src.excel_export import gsm_allocation_to_dict
@@ -44,47 +49,51 @@ def analyze_product(
     data_path: Path,
     product_id: str,
     *,
-    holding_cost_per_period: float = 1.25,
+    holding_cost_rate: float = 0.25,
     order_cost: float = 1000.0,
     backorder_cost: float = 50.0,
-    lead_time: float = 2.0,
+    lead_time: float | None = None,
     service_level: float = 0.95,
     fill_rate_target: float = 0.98,
     periods_per_year: float = 52.0,
     simulate: bool = False,
 ) -> dict[str, pd.DataFrame]:
     """Run analysis for one SKU; return tables for Power BI."""
+    meta = product_metadata(data_path, product_id, periods_per_year=periods_per_year)
+    mu, sigma = meta.mean_demand_per_period, meta.demand_std_per_period
+    lt = lead_time if lead_time is not None else meta.lead_time_periods
     series = load_demand_csv(data_path, product_id=product_id)
-    stats = demand_stats(series)
-    mu, sigma = stats["mean_demand_per_period"], stats["demand_std_per_period"]
     annual_demand = annualize_demand(mu, periods_per_year)
-    h_year = holding_cost_per_period * periods_per_year
+    h_year = holding_cost_rate * meta.mean_unit_cost * periods_per_year
+    h_period = h_year / periods_per_year
     hist = series.to_numpy()
 
     eoq = compute_eoq(annual_demand, h_year, order_cost)
     review = round_review_period_power_of_two(eoq.review_period * periods_per_year)
+    fit = select_distribution(hist)
     sq = continuous_review_sq(
-        annual_demand, mu, sigma, h_year, order_cost, lead_time, service_level, periods_per_year
+        annual_demand, mu, sigma, h_year, order_cost, lt, service_level, periods_per_year,
+        demand_distribution="auto", observed_skewness=fit.observed_skewness,
     )
     rs = periodic_review_rs(
-        annual_demand, mu, sigma, h_year, order_cost, lead_time, review, service_level
+        annual_demand, mu, sigma, h_year, order_cost, lt, review, service_level,
+        demand_distribution="auto", observed_skewness=fit.observed_skewness,
     )
-    risk = demand_over_risk_period(mu, sigma, lead_time, review_period=review)
+    risk = demand_over_risk_period(mu, sigma, lt, review_period=review)
     fr = safety_stock_for_fill_rate(risk.mean_demand, risk.demand_std, fill_rate_target)
-    best_rs = optimize_rs_policy(mu, sigma, lead_time, holding_cost_per_period, order_cost, backorder_cost)
-    best_sq = optimize_sq_policy(
-        annual_demand, mu, sigma, lead_time, h_year, order_cost, backorder_cost
-    )
-    fit = select_distribution(hist)
+    best_rs = optimize_rs_policy(mu, sigma, lt, h_period, order_cost, backorder_cost)
+    best_sq = optimize_sq_policy(annual_demand, mu, sigma, lt, h_year, order_cost, backorder_cost)
     _, ss_gamma = safety_stock_gamma(mu * 5, sigma * (5**0.5), service_level)
-    gsm = optimize_serial_gsm([4, 3, 2], 100, 25, [1, 2, 4], service_level, 1.0)
+    gsm = optimize_serial_gsm([4, 3, 2], mu, sigma, [1, 2, 4], service_level, 1.0)
 
     product_row = {
         "product_id": product_id,
         "mean_demand_per_period": mu,
         "demand_std_per_period": sigma,
         "annual_demand": annual_demand,
-        "periods_observed": int(stats["periods"]),
+        "periods_observed": meta.periods,
+        "unit_cost": meta.mean_unit_cost,
+        "lead_time_periods": lt,
         "distribution": fit.recommended.value,
         "observed_skewness": fit.observed_skewness,
         "gamma_ss_tau5": ss_gamma,
@@ -183,10 +192,10 @@ def analyze_product(
     sim_rows: list[dict[str, Any]] = []
     if simulate:
         sq_sim = simulate_sq_policy(
-            sq.reorder_point, sq.order_quantity, int(lead_time), historical_demand=hist
+            sq.reorder_point, sq.order_quantity, int(lt), historical_demand=hist
         )
         rs_sim = simulate_rs_policy(
-            rs.order_up_to_level, int(lead_time), int(review), historical_demand=hist
+            rs.order_up_to_level, int(lt), int(review), historical_demand=hist
         )
         gsm_sim = simulate_serial_gsm(gsm, [4, 3, 2], periods=2000, seed=1)
         sim_rows = [
@@ -233,10 +242,10 @@ def build_powerbi_dataset(
     output_dir: Path | str,
     *,
     product_ids: list[str] | None = None,
-    holding_cost_per_period: float = 1.25,
+    holding_cost_rate: float = 0.25,
     order_cost: float = 1000.0,
     backorder_cost: float = 50.0,
-    lead_time: float = 2.0,
+    lead_time: float | None = None,
     service_level: float = 0.95,
     fill_rate_target: float = 0.98,
     periods_per_year: float = 52.0,
@@ -257,10 +266,10 @@ def build_powerbi_dataset(
     params = pd.DataFrame(
         [
             {
-                "holding_cost_per_period": holding_cost_per_period,
+                "holding_cost_rate": holding_cost_rate,
                 "order_cost": order_cost,
                 "backorder_cost": backorder_cost,
-                "lead_time": lead_time,
+                "lead_time_override": lead_time,
                 "service_level": service_level,
                 "fill_rate_target": fill_rate_target,
                 "periods_per_year": periods_per_year,
@@ -297,7 +306,7 @@ def build_powerbi_dataset(
         result = analyze_product(
             data_path,
             pid,
-            holding_cost_per_period=holding_cost_per_period,
+            holding_cost_rate=holding_cost_rate,
             order_cost=order_cost,
             backorder_cost=backorder_cost,
             lead_time=lead_time,

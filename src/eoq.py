@@ -74,6 +74,75 @@ def cost_ratio_vs_optimal(order_quantity: float, optimal_quantity: float) -> flo
     return 0.5 * (optimal_quantity / order_quantity + order_quantity / optimal_quantity)
 
 
+@dataclass(frozen=True)
+class PriceBreak:
+    """Minimum order quantity for a unit price tier (Section 2.5.3)."""
+
+    min_quantity: float
+    unit_cost: float
+
+
+@dataclass(frozen=True)
+class EOQVolumeDiscountResult:
+    """Best EOQ across price breaks."""
+
+    order_quantity: float
+    optimal_total_cost: float
+    unit_cost: float
+    price_break_index: int
+    candidates: tuple[EOQResult, ...]
+
+
+def compute_eoq_volume_discount(
+    annual_demand: float,
+    holding_cost_rate: float,
+    fixed_order_cost: float,
+    price_breaks: list[PriceBreak],
+) -> EOQVolumeDiscountResult:
+    """
+    EOQ with all-units quantity discounts (Section 2.5.3).
+
+    holding_cost_rate: h as fraction of unit cost (e.g. 0.25 = 25%/year).
+    """
+    if not price_breaks:
+        raise ValueError("price_breaks required")
+    breaks = sorted(price_breaks, key=lambda b: b.min_quantity)
+
+    best_q = 0.0
+    best_cost = float("inf")
+    best_idx = 0
+    best_unit = breaks[0].unit_cost
+    candidates: list[EOQResult] = []
+
+    for idx, br in enumerate(breaks):
+        h = holding_cost_rate * br.unit_cost
+        if h <= 0:
+            continue
+        eoq = compute_eoq(annual_demand, h, fixed_order_cost)
+        candidates.append(eoq)
+        for q in {eoq.order_quantity, br.min_quantity}:
+            if q <= 0 or q < br.min_quantity:
+                continue
+            cost = fixed_order_cost * annual_demand / q + h * q / 2
+            if cost < best_cost:
+                best_cost = cost
+                best_q = q
+                best_idx = idx
+                best_unit = br.unit_cost
+
+    if best_q <= 0:
+        raise ValueError("no feasible quantity across price breaks")
+
+    h_best = holding_cost_rate * best_unit
+    return EOQVolumeDiscountResult(
+        order_quantity=best_q,
+        optimal_total_cost=best_cost,
+        unit_cost=best_unit,
+        price_break_index=best_idx,
+        candidates=tuple(candidates),
+    )
+
+
 def round_review_period_power_of_two(
     optimal_period: float,
     base_period: float = 1.0,

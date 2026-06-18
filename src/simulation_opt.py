@@ -241,3 +241,47 @@ def optimize_rs_simulation(
         periods=periods,
         seed=seed,
     )
+
+
+def optimize_rs_simulation_grid(
+    mean_demand: float,
+    std_demand: float,
+    lead_time_periods: int,
+    holding_cost_per_period: float,
+    fixed_order_cost: float,
+    backorder_cost: float,
+    *,
+    review_periods: list[int] | None = None,
+    bounds_ss: tuple[float, float] = (0.0, 200.0),
+    periods: int = 2_000,
+    seed: int = 42,
+) -> tuple[SimulationCostResult, int, float]:
+    """Grid over R and Ss (Ch. 13.3 multi-parameter search)."""
+    if review_periods is None:
+        review_periods = [1, 2, 4]
+
+    best: SimulationCostResult | None = None
+    best_r = review_periods[0]
+    best_ss = 0.0
+
+    for r in review_periods:
+        result = optimize_rs_simulation(
+            mean_demand,
+            std_demand,
+            lead_time_periods,
+            r,
+            holding_cost_per_period,
+            fixed_order_cost,
+            backorder_cost,
+            bounds_ss=bounds_ss,
+            periods=periods,
+            seed=seed,
+        )
+        if best is None or result.total_cost < best.total_cost:
+            best = result
+            best_r = r
+            best_ss = result.safety_stock
+
+    if best is None:
+        raise ValueError("no feasible simulation optimization")
+    return best, best_r, best_ss

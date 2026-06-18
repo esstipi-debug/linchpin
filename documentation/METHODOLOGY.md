@@ -13,7 +13,7 @@ The book progresses from **deterministic** models (Part I) to **stochastic** mod
 **Tools in the book:**
 
 - **Python** — computation, simulation, optimization
-- **Excel** — simple checks and visualization (export layer planned here)
+- **Excel / Power BI** — export layers (`excel_export.py`, `powerbi_export.py`)
 
 ---
 
@@ -180,10 +180,10 @@ Q* = sqrt(2(k + b*Us)D / h)          (eq. 8.5, iterate with z*)
 
 | Assumption | Limitation |
 |------------|------------|
-| Normal demand | Fails for high CV — use gamma (Ch. 9) or discrete (Ch. 12) |
-| Independent periods | Auto-correlation understates safety stock |
-| Backorders | Lost sales need different model (§5.3.2) |
-| Single SKU, single echelon | Multi-echelon in Ch. 10 |
+| Independent periods | Auto-correlation not modeled; extend with time-series if needed |
+| Backorders default | Use `lost_sales=True` in simulation for retail/perishable cases |
+| Single-echelon default | GSM serial chain in `multi_echelon.py`; not general networks |
+| Forecast σ_e | Use companion forecasting book; pass σ manually today |
 
 ---
 

@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.0.0] - 2026-06-18
+
+### Added
+- Product metadata from CSV: `unit_cost`, `lead_time_days` (`src/data_loader.py`)
+- EOQ volume discounts §2.5.3 (`compute_eoq_volume_discount`)
+- Gamma/auto safety stock in policies (`src/demand_variability.py`)
+- Multi-SKU batch analysis (`src/batch.py`, `examples/run_batch.py`)
+- Inventory charts (`examples/plot_inventory.py`)
+- Sim-opt grid over R and Ss (`optimize_rs_simulation_grid`)
+- GitHub Actions CI (Python 3.11–3.13)
+- Rewritten FAQ and CONTRIBUTING (removed placeholder marketing)
+
+### Changed
+- Power BI export uses per-SKU lead time, unit cost, GSM params
+- METHODOLOGY assumptions table updated
+- README: CI badge, full project layout
+
 ## [1.3.0] - 2026-06-18
 
 ### Added
