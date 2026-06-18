@@ -1,439 +1,224 @@
-# 🔬 Methodology & Technical Reference
+# Methodology
 
-**Deep dive into how everything works**
-
----
-
-## 📚 Table of Contents
-
-1. [Demand Forecasting](#demand-forecasting)
-2. [Inventory Optimization](#inventory-optimization)
-3. [ABC Classification](#abc-classification)
-4. [Safety Stock Calculation](#safety-stock-calculation)
-5. [Performance Metrics](#performance-metrics)
+Implementation reference for **Nicolas Vandeput**, *Inventory Optimization: Models and Simulations* (De Gruyter, 2020).
 
 ---
 
-## 🔮 Demand Forecasting
+## Philosophy
 
-### **Overview**
+> All models are wrong, but some are helpful. — George Box
 
-Demand forecasting predicts future sales based on historical patterns. We use 4 methods and select the best.
+The book progresses from **deterministic** models (Part I) to **stochastic** models with **simulation** validation (Part II+). This repo follows the same path: equations first, then simulate to check assumptions.
 
-### **Method 1: Moving Average**
+**Tools in the book:**
 
-**Formula:**
-```
-Forecast = Average of Last N periods
-F(t) = (D(t-1) + D(t-2) + ... + D(t-n)) / n
-```
-
-**Example:**
-```
-Last 3 months: 100, 105, 110 units
-Forecast = (100 + 105 + 110) / 3 = 105 units
-```
-
-**When to use:**
-- ✅ Stable demand
-- ✅ No strong seasonality
-- ✅ Limited historical data
-
-**Pros:** Simple, responsive
-**Cons:** Ignores trends and seasonality
+- **Python** — computation, simulation, optimization
+- **Excel** — simple checks and visualization (export layer planned here)
 
 ---
 
-### **Method 2: Exponential Smoothing (ETS)**
+## Part I — Deterministic supply chains
 
-**Formula:**
+### Chapter 1 — Inventory policies
+
+| Policy | Notation | When to order | How much |
+|--------|----------|---------------|----------|
+| Continuous review | `(s, Q)` | When net inventory ≤ s | Fixed Q |
+| Periodic review | `(R, S)` | Every R periods | Up to level S |
+| Periodic + fixed Q | `(R, s, Q)` | Every R if inventory ≤ s | Fixed Q |
+
+**Terminology warning (§1.5):** “reorder point”, “stock target”, and “ROP” mean different things across vendors. Always define terms explicitly.
+
+### Chapter 2 — EOQ
+
+**Cost model** (eq. 2.1):
+
 ```
-F(t+1) = α × D(t) + (1-α) × F(t)
-
-Where:
-- α (alpha) = smoothing factor (0.1 to 0.3)
-- D(t) = actual demand at time t
-- F(t) = forecast at time t
+C(Q) = k·D/Q + h·Q/2
 ```
 
-**Example:**
+**Optimum** (eq. 2.2–2.3):
+
 ```
-Last forecast: 100 units
-Actual demand: 110 units
-α = 0.2
-New forecast = 0.2 × 110 + 0.8 × 100 = 102 units
+Q* = √(2kD/h)
+C* = √(2kDh)
 ```
 
-**When to use:**
-- ✅ Moderate trend
-- ✅ Light seasonality
-- ✅ Need responsive forecast
+At Q*, holding cost equals transaction cost.
 
-**Pros:** Adapts to changes, simple
-**Cons:** Requires parameter tuning
+**Sensitivity (§2.4):** mis-estimating k or h by 2× changes Q* by ~41% but total cost by only ~6%.
+
+**Implementation:** `src/eoq.py`
+
+### Chapter 3 — Lead time and review period
+
+Deterministic reorder point:
+
+```
+s = d·L          (continuous review, no safety stock yet)
+S = d·L + d·R    (periodic review)
+```
+
+**Power-of-2 review period (§3.2.1):** round R to 2^k × base period; worst-case cost penalty ~6%.
+
+**Confusion curse (§3.3):** for `(R,S)` with long L, average on-hand ≪ S.
 
 ---
 
-### **Method 3: ARIMA (AutoRegressive Integrated Moving Average)**
+## Part II — Stochastic supply chains
 
-**Formula:**
+### Chapter 4 — Safety stock
+
+**Cycle service level α:** probability of no stockout during an order cycle (not the same as fill rate — Ch. 7).
+
+**Normal demand** over τ periods (eq. 4.3):
+
 ```
-ARIMA(p,d,q)
-- p = autoregressive terms
-- d = differencing (for stationarity)
-- q = moving average terms
-
-Y(t) = c + φ₁Y(t-1) + ... + φₚY(t-p) + θ₁ε(t-1) + ... + θqε(t-q)
+Ss = z_α · σ_d · √τ
+z_α = Φ⁻¹(α)
 ```
 
-**When to use:**
-- ✅ Complex patterns
-- ✅ Multiple trends
-- ✅ Seasonal patterns
-- ✅ 2+ years of data
+Use **forecast error σ_e** instead of σ_d when using forecasts (§4.2.5).
 
-**Pros:** Captures complex patterns, statistically robust
-**Cons:** Requires more data, slower calculation
+**Demand aggregation:** over τ independent periods, σ scales with √τ.
+
+**Implementation:** `src/safety_stock.py`
+
+### Chapter 5 — Policies + simulation
+
+#### (s, Q)
+
+```
+Ss = z_α · σ_d · √L
+s  = d·L + Ss
+Q  = Q*   (from EOQ)
+```
+
+Risk period τ = L.
+
+#### (R, S)
+
+```
+Ss = z_α · σ_d · √(R + L)
+S  = d·L + d·R + Ss
+```
+
+Risk period τ = R + L (blind spot between reviews — §5.1.2).
+
+**Expected on-hand** (theoretical):
+
+| Policy | Cycle stock | Safety stock |
+|--------|-------------|--------------|
+| (s,Q) | Q/2 | Ss |
+| (R,S) | d·R/2 | Ss |
+
+**Inventory zones (Table 5.2):**
+
+| Zone | Condition |
+|------|-----------|
+| Shortage | on-hand ≤ 0 |
+| Under-stock | 0 < on-hand < Ss |
+| Target | Ss ≤ on-hand ≤ Cs + Ss |
+| Over-stock | above cycle + safety + in-transit |
+
+**Simulation (§5.3):** discrete-period model with backorders; validates cycle service level vs theory.
+
+**Implementation:** `src/policies.py`, `src/simulation.py`
 
 ---
 
-### **Method 4: Prophet (Facebook)**
+## Part III — Advanced stochastic models (implemented)
 
-**Formula:**
+### Chapter 6 — Stochastic lead time
+
+Combined demand over risk period (eq. 6.4–6.5):
+
 ```
-y(t) = g(t) + s(t) + h(t) + ε(t)
-
-Where:
-- g(t) = trend (piecewise linear/logistic)
-- s(t) = seasonality (Fourier series)
-- h(t) = holidays effect
-- ε(t) = error term
+sigma_x = sqrt(tau * sigma_d^2 + sigma_L^2 * mu_d^2)
+mu_x = mu_d * tau        (tau = L or R+L)
 ```
 
-**When to use:**
-- ✅ Strong seasonality
-- ✅ Holiday effects matter
-- ✅ Multiple seasonalities
-- ✅ Business applications
+**Implementation:** `src/risk_period.py`
 
-**Pros:** Robust, handles holidays, very practical
-**Cons:** Less statistically pure, requires tuning
+### Chapter 7 — Fill rate
+
+Fill rate beta = 1 - Us/dc, where Us uses the normal loss function:
+
+```
+L_N(x) = phi(x) - x*(1 - Phi(x))
+beta = 1 - (sigma_x/dc) * L_N(Ss/sigma_x)
+```
+
+To target fill rate beta, invert via `inverse_standard_loss(dc*(1-beta)/sigma_x)`.
+
+**Key insight (§7.4):** fill rate depends on cycle stock + safety stock; cycle service level only on safety stock. Do not use cycle SL as KPI when order cycles are long.
+
+**Implementation:** `src/fill_rate.py`
+
+### Chapter 8 — Cost optimization
+
+**(R,S) cost per period (eq. 8.2):**
+
+```
+C = h(dR/2 + z*sigma_x) + k/R + b*sigma_x*L_N(z)/R
+alpha* = 1 - hR/b                    (eq. 8.3)
+```
+
+**(s,Q) cost per year:**
+
+```
+C = h(Q/2 + z*sigma_x) + kD/Q + b*sigma_x*L_N(z)*D/Q
+alpha* = 1 - hQ/(bD)                 (eq. 8.4)
+Q* = sqrt(2(k + b*Us)D / h)          (eq. 8.5, iterate with z*)
+```
+
+**Implementation:** `src/cost_optimization.py`, `examples/run_part3.py`
 
 ---
 
-### **Method Selection Logic**
+## Assumptions (Part I–II)
 
-```
-IF historical_data < 3 months:
-    Use: Moving Average
-ELIF has_strong_seasonality:
-    Use: Prophet
-ELIF has_trend AND complex_patterns:
-    Use: ARIMA
-ELSE:
-    Use: Exponential Smoothing
-
-FINAL: Select method with lowest MAE (Mean Absolute Error)
-```
+| Assumption | Limitation |
+|------------|------------|
+| Normal demand | Fails for high CV — use gamma (Ch. 9) or discrete (Ch. 12) |
+| Independent periods | Auto-correlation understates safety stock |
+| Backorders | Lost sales need different model (§5.3.2) |
+| Single SKU, single echelon | Multi-echelon in Ch. 10 |
 
 ---
 
-### **Accuracy Metrics**
+## Glossary (selected)
 
-#### **MAE (Mean Absolute Error)**
-```
-MAE = Σ|Actual - Forecast| / n
+| Term | Definition |
+|------|------------|
+| Cycle stock | Inventory to cover expected demand in a cycle |
+| Safety stock | Buffer against demand/supply variation |
+| Net inventory | On-hand + in-transit − backorders |
+| Risk period | Max wait until next replenishment (L or R+L) |
+| Fill rate | Fraction of demand served from stock (Ch. 7) |
+| Cycle service level | Prob. no stockout in one replenishment cycle |
 
-Example:
-Actual: [100, 110, 105]
-Forecast: [98, 112, 104]
-Error: [2, 2, 1]
-MAE = (2 + 2 + 1) / 3 = 1.67 units
-```
-
-#### **RMSE (Root Mean Squared Error)**
-```
-RMSE = √(Σ(Actual - Forecast)² / n)
-
-Example:
-Errors: [2, 2, 1]
-RMSE = √((4 + 4 + 1) / 3) = 2.16 units
-```
-
-#### **MAPE (Mean Absolute Percentage Error)**
-```
-MAPE = (Σ|Actual - Forecast| / Σ|Actual|) × 100%
-
-Example:
-Actual total: 315 units
-Errors total: 5 units
-MAPE = (5 / 315) × 100% = 1.59%
-```
+Full glossary: book pp. 283+.
 
 ---
 
-## 📦 Inventory Optimization
+## Planned (Part III–IV)
 
-### **EOQ (Economic Order Quantity)**
-
-**Formula:**
-```
-EOQ = √(2 × D × S / H)
-
-Where:
-- D = Annual demand (units)
-- S = Order cost per unit
-- H = Annual holding cost per unit
-```
-
-**Derivation:**
-```
-Total Cost = (D/Q) × S + (Q/2) × H
-
-Minimize by taking derivative and setting to 0:
-d(TC)/dQ = -D×S/Q² + H/2 = 0
-Q² = 2×D×S/H
-Q = √(2×D×S/H)
-```
-
-**Example:**
-```
-Annual demand: 12,000 units
-Order cost: $50 per order
-Holding cost: $2 per unit per year
-
-EOQ = √(2 × 12,000 × 50 / 2)
-    = √(600,000)
-    = 774.6 ≈ 775 units
-
-Recommendation: Order 775 units per cycle
-```
-
-**Cost Savings:**
-```
-Without optimization (order 1,000 units):
-- Ordering cost: (12,000/1,000) × $50 = $600
-- Holding cost: (1,000/2) × $2 = $1,000
-- Total: $1,600
-
-With EOQ (order 775 units):
-- Ordering cost: (12,000/775) × $50 = $775
-- Holding cost: (775/2) × $2 = $775
-- Total: $1,550
-
-Savings: $50/year (3.1%)
-```
+| Chapter | Topic | Module |
+|---------|-------|--------|
+| 6 | Stochastic lead time | `src/risk_period.py` ✅ |
+| 7 | Fill rate | `src/fill_rate.py` ✅ |
+| 8 | Cost / service optimization | `src/cost_optimization.py` ✅ |
+| 9 | Beyond normality (gamma) | `src/distributions.py` ✅ |
+| 10 | Multi-echelon (GSM) | `src/multi_echelon.py` ✅ |
+| 11 | Newsvendor | `src/newsvendor.py` ✅ |
+| 12 | Histograms / KDE | `src/discrete_demand.py` ✅ |
+| 13 | Simulation optimization | `src/simulation_opt.py` ✅ |
 
 ---
 
-### **ROP (Reorder Point)**
+## References
 
-**Formula:**
-```
-ROP = (D_avg × LT) + SS
-
-Where:
-- D_avg = Average daily demand
-- LT = Lead time (days)
-- SS = Safety stock
-```
-
-**Example:**
-```
-Average daily demand: 100 units
-Lead time: 7 days
-Safety stock: 150 units
-
-ROP = (100 × 7) + 150 = 850 units
-
-Action: When inventory reaches 850 units, place new order
-```
-
-**Why it works:**
-```
-Timeline:
-Day 0: Inventory = 1,000 units (place order)
-Day 0-7: Inventory decreases by 100/day
-Day 7: Inventory reaches 250 units (safety stock)
-Day 7: New order arrives
-Day 7+: Inventory replenished
-```
-
----
-
-### **Safety Stock**
-
-**Formula (Service Level method):**
-```
-SS = Z × σ_d × √LT
-
-Where:
-- Z = Z-score for desired service level
-- σ_d = Standard deviation of daily demand
-- LT = Lead time (days)
-```
-
-**Service Level Z-Scores:**
-```
-Service Level | Z-Score | Stockout Risk
-50%           | 0.0     | 50%
-75%           | 0.67    | 25%
-90%           | 1.28    | 10%
-95%           | 1.65    | 5%
-99%           | 2.33    | 1%
-```
-
-**Example:**
-```
-Demand std dev: 20 units/day
-Lead time: 7 days
-Target service level: 95% (Z = 1.65)
-
-SS = 1.65 × 20 × √7
-   = 1.65 × 20 × 2.646
-   = 87.4 ≈ 88 units
-
-Interpretation:
-- Keep 88 units safety stock
-- This covers 95% of demand scenarios
-- Stockout risk = 5%
-```
-
----
-
-## 📊 ABC Classification
-
-**Pareto Principle: 80% of effects come from 20% of causes**
-
-### **Formula**
-
-```
-1. Calculate: Sales Value = Unit Sales × Unit Price
-2. Sort: Highest to lowest sales value
-3. Cumulative %: Calculate cumulative sales %
-4. Classify:
-   - A: Top 20% (cumulative 80% value)
-   - B: Next 30% (cumulative 15% value)
-   - C: Bottom 50% (cumulative 5% value)
-```
-
-### **Example**
-
-```
-SKU    | Units | Price | Sales | Cum%  | Class
--------|-------|-------|-------|-------|------
-SKU-A  | 1000  | $50   | $50K  | 41%   | A
-SKU-B  | 500   | $40   | $20K  | 57%   | A
-SKU-C  | 2000  | $8    | $16K  | 70%   | A
-SKU-D  | 1500  | $5    | $7.5K | 76%   | B
-SKU-E  | 1200  | $4    | $4.8K | 80%   | B
-SKU-F  | 3000  | $2    | $6K   | 85%   | B
-SKU-G  | 5000  | $1    | $5K   | 89%   | C
-... (50 more)
-```
-
-### **Management Strategy by Category**
-
-```
-Category A (High Value):
-- Tight inventory control
-- Frequent forecasting updates
-- Higher safety stock
-- Monitor daily
-- Example: Keep 95% service level
-
-Category B (Medium Value):
-- Standard control
-- Weekly updates
-- Standard safety stock
-- Monitor weekly
-- Example: Keep 90% service level
-
-Category C (Low Value):
-- Loose control
-- Monthly updates
-- Low safety stock
-- Monitor monthly
-- Example: Keep 80% service level
-```
-
----
-
-## 🎯 Performance Metrics
-
-### **Inventory Turnover**
-
-**Formula:**
-```
-Turnover = COGS / Average Inventory Value
-```
-
-**Interpretation:**
-```
-Turnover = 4 means inventory is replaced 4 times/year
-Higher = Better (less capital tied up)
-Lower = Worse (excess inventory)
-
-Industry Benchmarks:
-- Retail: 5-8
-- Pharmacy: 8-12
-- Manufacturing: 4-6
-- E-commerce: 6-10
-```
-
----
-
-### **Fill Rate**
-
-**Formula:**
-```
-Fill Rate = Units Fulfilled / Units Demanded × 100%
-```
-
-**Example:**
-```
-Customer demand: 1,000 units
-Units in stock: 950 units
-Fill rate = 950/1,000 = 95%
-
-Missing: 50 units (5% stockout)
-```
-
----
-
-### **Carrying Cost**
-
-**Formula:**
-```
-Carrying Cost = Average Inventory × Holding Cost %
-
-Holding Cost includes:
-- Storage space: 5%
-- Utilities: 2%
-- Insurance: 1.5%
-- Obsolescence: 2%
-- Total: ~10.5% of inventory value
-```
-
----
-
-## 📈 Key Assumptions
-
-1. **Demand is independent and identically distributed**
-2. **Lead times are relatively consistent**
-3. **No supply constraints**
-4. **Holding costs are linear**
-5. **No quantity discounts**
-
----
-
-## ⚠️ Limitations
-
-- ✅ Works best with consistent demand
-- ⚠️ May not work for highly volatile products
-- ⚠️ Seasonal spikes need manual adjustment
-- ⚠️ Does not account for supply constraints
-- ⚠️ Assume lead times are stable
-
----
-
+- Vandeput, N. (2020). *Inventory Optimization: Models and Simulations*. De Gruyter.
+- Silver, E., Pyke, D., Thomas, D. — classic inventory reference cited in the book.
+- Harris, F. W. (1913) — original EOQ.

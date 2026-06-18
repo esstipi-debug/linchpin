@@ -1,318 +1,127 @@
-# 🚀 Getting Started Guide
+# Getting Started
 
-**Get up and running in 10 minutes!**
+**Run inventory models from Vandeput (2020) in under 10 minutes.**
 
----
-
-## ✅ Prerequisites
-
-### **For Excel Users**
-- ✅ Microsoft Excel 2016 or newer
-- ✅ Windows or Mac
-- ✅ ~10 minutes
-- ✅ Your data (CSV or manual entry)
-
-### **For Power BI Users**
-- ✅ Power BI Desktop (free)
-- ✅ Windows 10/11
-- ✅ ~15 minutes
-- ✅ Your data (Excel, CSV, or SQL)
+Based on: *Inventory Optimization: Models and Simulations* — Nicolas Vandeput, De Gruyter 2020.
 
 ---
 
-## 📥 Step 1: Download Files
+## Prerequisites
 
-### **Option A: Clone Repository**
+- Python 3.10+
+- pip
+
+Optional: Excel or Power BI for viewing exported results (not required for Part I–II).
+
+---
+
+## 1. Install
+
 ```bash
-git clone https://github.com/yourusername/supply-chain-optimization.git
+git clone <this-repo>
 cd supply-chain-optimization
-```
-
-### **Option B: Download ZIP**
-- Go to [Releases](https://github.com/yourusername/supply-chain-optimization/releases)
-- Download latest version
-- Extract to your computer
-
----
-
-## 📊 Step 2: Prepare Your Data
-
-### **Required Format**
-
-Your data should have these columns:
-
-```
-Date          Product_ID  Quantity  Unit_Cost  Lead_Time_Days
-2024-01-01   SKU-A       100       50         7
-2024-01-02   SKU-A       105       50         7
-2024-01-03   SKU-B       250       25         14
-2024-01-04   SKU-B       245       25         14
-2024-01-05   SKU-C       50        100        3
-```
-
-### **Data Tips**
-- ✅ Use consistent date format (YYYY-MM-DD)
-- ✅ Include at least 12 months of history
-- ✅ Remove blank rows
-- ✅ Keep SKU names consistent
-
-### **Sample Data**
-Need test data? Use [sample-data.csv](../sample-data.csv) included in repo.
-
----
-
-## 🎯 Step 3: Excel Setup (5 minutes)
-
-### **Option A: supply-chain-master.xlsm**
-
-**This is your main dashboard. Follow these steps:**
-
-1. **Open File**
-   - Double-click `excel-templates/supply-chain-master.xlsm`
-   - Click "Enable Macros" when prompted
-
-2. **Load Data**
-   - Go to "Data Input" sheet
-   - Paste your data starting at cell A1
-   - Headers should be in row 1
-
-3. **Run Calculations**
-   - Click "Refresh" button (yellow button on right)
-   - Or: Press Ctrl+Shift+R
-   - Wait 5-10 seconds for calculations
-
-4. **View Results**
-   - Click "Dashboard" tab
-   - See all recommendations instantly
-
-### **What You'll See**
-
-| Metric | Example | Meaning |
-|--------|---------|---------|
-| **EOQ** | 548 units | Optimal order quantity |
-| **ROP** | 205 units | Reorder when stock hits this |
-| **Safety Stock** | 103 units | Buffer for uncertainty |
-| **Forecast** | 5,200 units | Expected demand next month |
-| **Cost Savings** | $127K/year | Estimated savings |
-
-### **Next Steps**
-- Review "Recommendations" sheet
-- Update your supplier orders
-- Monitor "Alerts" sheet weekly
-- Update data monthly
-
----
-
-## 📈 Step 4: Power BI Setup (10 minutes)
-
-### **First Time Setup**
-
-1. **Open Power BI Desktop**
-   - Download free from [powerbi.microsoft.com](https://powerbi.microsoft.com)
-   - Install and open
-
-2. **Open Dashboard File**
-   - File → Open
-   - Navigate to `power-bi/supply-chain-dashboard.pbix`
-   - Click Open
-
-3. **Connect Data Source**
-   - Click "Transform data" (or Edit Queries)
-   - Select your data source:
-     - **Excel file:** Browse and select
-     - **CSV:** Browse and select
-     - **SQL Server:** Enter connection string
-     - **Other:** Use "Get Data"
-
-4. **Load & Refresh**
-   - Click "Close & Apply"
-   - Wait for dashboard to refresh
-   - All visuals update automatically
-
-5. **Publish (Optional)**
-   - File → Publish
-   - Sign in to Power BI Service
-   - Select workspace
-   - Share link with team
-
-### **Dashboard Navigation**
-
-```
-📊 Overview
-├─ KPI Cards (EOQ, ROP, Forecast, etc.)
-├─ Time series chart (Demand trends)
-└─ ABC Classification matrix
-
-📈 Inventory Health
-├─ Stock level gauge
-├─ Reorder alerts
-└─ Turnover metrics
-
-🎯 Forecast Accuracy
-├─ Forecast vs Actual
-├─ Accuracy %, MAE, RMSE
-└─ Trend analysis
+pip install -r requirements.txt
 ```
 
 ---
 
-## 🎓 Step 5: Understanding the Results
+## 2. Run the example
 
-### **EOQ (Economic Order Quantity)**
-
-```
-Formula: √(2 × Annual Demand × Order Cost / Holding Cost)
-
-Example:
-- Annual demand: 12,000 units
-- Order cost: $50 per order
-- Holding cost: $2 per unit per year
-- EOQ = √(2 × 12,000 × 50 / 2) = 548 units
-
-Meaning: Order 548 units each time to minimize total cost
+```bash
+python examples/run_part1_part2.py --simulate
 ```
 
-### **ROP (Reorder Point)**
+This will:
 
-```
-Formula: (Average Demand × Lead Time) + Safety Stock
+1. Load `data/sample_demand.csv` for `SKU-A`
+2. Compute **EOQ** (Chapter 2)
+3. Build **(s,Q)** and **(R,S)** policies with safety stock (Chapters 4–5)
+4. **Simulate** inventory levels and cycle service level (Chapter 5.3)
 
-Example:
-- Average demand: 100 units/day
-- Lead time: 7 days
-- Safety stock: 103 units
-- ROP = (100 × 7) + 103 = 803 units
+Part III and IV:
 
-Meaning: When inventory reaches 803 units, place new order
-```
-
-### **Safety Stock**
-
-```
-Formula: Z-score × Std Dev of Demand × √Lead Time
-
-Example:
-- Service level: 95% (Z = 1.65)
-- Demand std dev: 15 units
-- Lead time: 7 days
-- Safety Stock = 1.65 × 15 × √7 = 65 units
-
-Meaning: Keep extra 65 units to prevent stockouts 95% of the time
+```bash
+python examples/run_part3.py    # fill rate + cost optimization (Ch. 7-8)
+python examples/run_part4.py    # gamma, GSM, newsvendor, KDE, sim-opt (Ch. 9-13)
 ```
 
 ---
 
-## 🔄 Step 6: Monthly Updates
+## 3. Use your data
 
-### **Update Your Data**
+CSV columns:
 
-```
-Every month:
-1. Add new sales data to Data Input sheet
-2. Click "Refresh" button
-3. Review updated recommendations
-4. Update supplier orders if needed
-5. Track actual vs forecast
+```csv
+date,product_id,quantity,unit_cost,lead_time_days
+2024-01-01,SKU-A,100,50,7
 ```
 
-### **Monitor Key Metrics**
+Run:
 
-| Metric | Check | Action |
-|--------|-------|--------|
-| **Forecast Accuracy** | < 80% | Review assumptions |
-| **Stockouts** | > 5% | Increase safety stock |
-| **Excess Stock** | > 20% | Decrease EOQ |
-| **Service Level** | < 95% | Adjust ROP |
+```bash
+python examples/run_part1_part2.py \
+  --data path/to/demand.csv \
+  --product YOUR-SKU \
+  --holding-cost 1.75 \
+  --order-cost 50 \
+  --lead-time 2 \
+  --service-level 0.95 \
+  --simulate
+```
 
----
-
-## 📊 Step 7: Interpret Your Data
-
-### **Green Light ✅**
-- Forecast accuracy > 85%
-- Stockouts < 2%
-- Service level > 95%
-- No excess inventory > 20%
-
-### **Yellow Light ⚠️**
-- Forecast accuracy 75-85%
-- Stockouts 2-5%
-- Service level 90-95%
-- Excess inventory 15-20%
-- **Action:** Review data quality, adjust parameters
-
-### **Red Light 🔴**
-- Forecast accuracy < 75%
-- Stockouts > 5%
-- Service level < 90%
-- Excess inventory > 20%
-- **Action:** Review methodology, check for anomalies
+| Parameter | Book symbol | Typical source |
+|-----------|-------------|----------------|
+| `--holding-cost` | h | Finance / warehouse (§2.1) |
+| `--order-cost` | k | Procurement (§2.1) |
+| `--lead-time` | L | Supplier master data (§3.1) |
+| `--service-level` | α | Business target (§4.1) |
 
 ---
 
-## 🆘 Troubleshooting
+## 4. Interpret results
 
-### **Problem: Macros don't work in Excel**
-**Solution:**
-1. File → Options → Trust Center
-2. Click "Trust Center Settings"
-3. Click "Macro Settings"
-4. Select "Enable All Macros"
-5. Click OK
+### EOQ output
 
-### **Problem: Power BI shows "Authentication failed"**
-**Solution:**
-1. Click "Edit Queries"
-2. Select your data source
-3. Click "Credentials"
-4. Re-enter authentication info
-5. Click "Connect"
+- **Q*** — economic order quantity (eq. 2.2)
+- **Optimal yearly cost** — minimum of holding + ordering (eq. 2.3)
 
-### **Problem: Formulas show #REF! error**
-**Solution:**
-1. Check data format (dates, numbers)
-2. Ensure no blank rows in data
-3. Delete calculations and re-paste data
-4. Click "Refresh" button again
+### (s, Q) — continuous review
 
-### **Problem: Dashboard is blank/empty**
-**Solution:**
-1. Verify data is connected
-2. Click "Refresh" in Power BI
-3. Check data source path is correct
-4. Restart Power BI if needed
+- **s** = demand over lead time + safety stock
+- Order **Q** whenever net inventory ≤ **s**
+
+### (R, S) — periodic review
+
+- **S** = order-up-to level (not average on-hand!)
+- Review every **R** periods; order `S − net inventory`
+- Safety stock uses risk period **R + L** (§5.1.2)
+
+### Simulation
+
+Compare **simulated cycle service level** to your target α. Large gaps often mean:
+
+- Demand is not normal (see Ch. 9)
+- Review period omitted from safety stock (§5.1)
+- Confusing fill rate with cycle service level (§4.1, Ch. 7)
 
 ---
 
-## 📚 Next Steps
+## 5. Next steps
 
-### **Learn More**
-- Read [User Guide](USER_GUIDE.md) for detailed explanation
-- Study [Methodology](METHODOLOGY.md) to understand formulas
-- Review [Case Studies](../case-studies/CASE_STUDIES.md) for examples
+| Goal | Read |
+|------|------|
+| Formulas and assumptions | [METHODOLOGY.md](METHODOLOGY.md) |
+| Common pitfalls | [FAQ.md](FAQ.md) |
+| Fill rate, gamma demand, newsvendor | Ch. 7–13 — `examples/run_part3.py`, `run_part4.py` |
 
-### **Get Help**
-- Check [FAQ](FAQ.md) for common questions
-- Browse [GitHub Issues](https://github.com/yourusername/supply-chain-optimization/issues)
-- Email: support@example.com
-
-### **Level Up**
-- Customize templates for your business
-- Integrate with your ERP system
-- Share dashboards with your team
-- Track ROI over time
+Official book Python snippets: [supchains.com/resources-invopt](https://supchains.com/resources-invopt) (password: `SupChains-IO`).
 
 ---
 
-## ✅ You're Ready!
+## 6. Run tests
 
-Congratulations! You now have:
-- ✅ Professional forecasting templates
-- ✅ Inventory optimization models
-- ✅ Executive dashboards
-- ✅ Automated recommendations
+```bash
+pytest
+```
 
-**Next:** Load your first data and see the magic! 🎯
-
-Questions? Check [FAQ.md](FAQ.md) or open an issue on GitHub.
-
+Tests include the book’s EOQ numeric example (§2.2.4: D=1000, k=50, h=1.75 → Q*≈239).

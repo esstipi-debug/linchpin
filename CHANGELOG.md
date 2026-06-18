@@ -1,100 +1,56 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
----
-
-## [2.0.0] - 2026-03-18
+## [1.0.0] - 2026-06-18
 
 ### Added
-- ✨ Complete Excel template suite (5 files)
-  - supply-chain-master.xlsm (Main dashboard)
-  - forecasting-dashboard.xlsx (4 forecasting methods)
-  - inventory-optimization.xlsx (EOQ + ROP)
-  - abc-classification.xlsx (Pareto analysis)
-  - case-studies.xlsx (3 real examples)
+- Gamma demand, distribution selection, gamma loss (Ch. 9) — `src/distributions.py`
+- Serial multi-echelon GSM allocation (Ch. 10) — `src/multi_echelon.py`
+- Newsvendor discrete/continuous (Ch. 11) — `src/newsvendor.py`
+- Histogram PMF and KDE discretization (Ch. 12) — `src/discrete_demand.py`
+- Simulation-based safety stock optimization (Ch. 13) — `src/simulation_opt.py`
+- Example `examples/run_part4.py`
+- Tests for chapters 9–13
 
-- 📊 Complete Power BI dashboard suite (3 files)
-  - supply-chain-dashboard.pbix (Executive overview)
-  - inventory-health.pbix (Operations)
-  - forecast-vs-actual.pbix (Analytics)
+### Changed
+- README and METHODOLOGY: full book coverage (Ch. 1–13) documented
+- `src/__init__.py`: exports for all modules
 
-- 📚 Comprehensive documentation
-  - GETTING_STARTED.md (10-minute guide)
-  - USER_GUIDE.md (Complete reference)
-  - METHODOLOGY.md (Technical deep dive)
-  - FAQ.md (100+ Q&A)
-
-- 🏆 Real-world case studies
-  - Retail chain (500 stores, $1.36M savings)
-  - Pharmacy network ($141K savings)
-  - Manufacturing supplier ($1.53M savings)
-
-- 🤝 Community resources
-  - CONTRIBUTING.md (Contribution guidelines)
-  - MIT LICENSE
-  - This CHANGELOG
-
-### Fixed
-- N/A (Initial release)
-
-### Known Limitations
-- Excel templates require VBA enabled
-- Power BI requires Windows 10+ or Mac with specific versions
-- Forecasting requires minimum 12 months of data
-- Does not account for supply constraints
-
----
-
-## [1.0.0] - 2026-01-15 (Initial Concept)
+## [0.2.0] - 2026-06-18
 
 ### Added
-- Initial project structure
-- Basic formulas for EOQ/ROP calculation
-- Methodology documentation
+- Stochastic lead time in policies (Ch. 6) — `src/risk_period.py`
+- Fill rate + normal loss function (Ch. 7) — `src/fill_rate.py`
+- Cost/service optimization for (R,S) and (s,Q) (Ch. 8) — `src/cost_optimization.py`
+- Example `examples/run_part3.py`
+- Tests for fill rate, cost optimization, lead time
+
+## [0.1.0] - 2026-06-18
+
+### Added
+- Python implementation aligned with Vandeput (2020), Part I–II:
+  - EOQ model (`src/eoq.py`) — Ch. 2–3
+  - Safety stock under normal demand (`src/safety_stock.py`) — Ch. 4
+  - Policies `(s,Q)` and `(R,S)` (`src/policies.py`) — Ch. 5
+  - Discrete-period simulation with backorders (`src/simulation.py`) — Ch. 5.3
+- Sample demand data (`data/sample_demand.csv`)
+- Runnable example (`examples/run_part1_part2.py`)
+- Unit tests with book numeric example (§2.2.4)
+- Documentation rewritten to reference the book
+
+### Changed
+- README: removed placeholder marketing; cites Vandeput (2020)
+- Excel / Power BI folders marked as planned export layers
+
+### Removed
+- Claims of ARIMA/Prophet templates (not in the inventory optimization book)
+
+### Known limitations
+- Normal demand assumption only (Ch. 9+ not yet implemented)
+- Backorders only (lost sales in Ch. 5.3.2 — planned)
+- Single-echelon, single SKU
 
 ---
 
-## Future Roadmap
+## [2.0.0] - 2026-03-18 (documentation-only release)
 
-### [2.1.0] - Q2 2026
-- [ ] SQL Server integration templates
-- [ ] Google Sheets version
-- [ ] Mobile app (iOS/Android)
-- [ ] API documentation
-
-### [2.2.0] - Q3 2026
-- [ ] AI-powered recommendations
-- [ ] Automated email reporting
-- [ ] ERP system integrations (SAP, NetSuite, Oracle)
-- [ ] Advanced forecasting (LSTM, Prophet enhancements)
-
-### [3.0.0] - Q4 2026
-- [ ] SaaS platform (beta)
-- [ ] Cloud-based dashboards
-- [ ] Real-time data sync
-- [ ] Multi-user collaboration
-- [ ] Advanced analytics
-
----
-
-## Version History
-
-| Version | Date | Type | Status |
-|---------|------|------|--------|
-| 2.0.0 | 2026-03-18 | Major | 🟢 Current |
-| 1.0.0 | 2026-01-15 | Initial | ⚫ Archive |
-
----
-
-## Contributing
-
-Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-## License
-
-This project is licensed under the MIT License - see [LICENSE](LICENSE) file for details.
-
+Initial markdown structure without executable templates.
