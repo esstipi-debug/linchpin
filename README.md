@@ -25,6 +25,9 @@ python examples/run_part3.py
 
 # Gamma, GSM, newsvendor, KDE, simulation optimization (Ch. 9-13)
 python examples/run_part4.py
+
+# Full pipeline + optional CSV export for Excel
+python examples/run_complete.py --simulate --export output/summary.csv
 ```
 
 Expected output includes `Q*`, reorder point `s`, order-up-to level `S`, safety stock, and simulated service levels.
@@ -39,12 +42,12 @@ Expected output includes `Q*`, reorder point `s`, order-up-to level `S`, safety 
 | Ch. 2 — EOQ | `src/eoq.py` | ✅ |
 | Ch. 3 — Lead time & review period | `src/eoq.py`, `src/policies.py` | ✅ power-of-2 rounding |
 | Ch. 4 — Safety stock | `src/safety_stock.py` | ✅ normal demand |
-| Ch. 5 — Simulation | `src/simulation.py` | ✅ backorders |
+| Ch. 5 — Simulation | `src/simulation.py` | ✅ backorders + lost sales |
 | Ch. 6 — Stochastic lead time | `src/risk_period.py`, `src/policies.py` | ✅ |
 | Ch. 7 — Fill rate | `src/fill_rate.py` | ✅ |
 | Ch. 8 — Cost optimization | `src/cost_optimization.py` | ✅ |
 | Ch. 9 — Gamma demand | `src/distributions.py` | ✅ |
-| Ch. 10 — Multi-echelon GSM | `src/multi_echelon.py` | ✅ |
+| Ch. 10 — Multi-echelon GSM | `src/multi_echelon.py` | ✅ allocation + simulation |
 | Ch. 11 — Newsvendor | `src/newsvendor.py` | ✅ |
 | Ch. 12 — Histograms / KDE | `src/discrete_demand.py` | ✅ |
 | Ch. 13 — Simulation optimization | `src/simulation_opt.py` | ✅ |
@@ -130,9 +133,20 @@ Ss = z_alpha * sigma_d * sqrt(tau)
 
 ## Roadmap
 
-1. **Excel export** — Results sheets fed from Python (book uses Excel for visualization)
-2. **Multi-echelon simulation** — Full discrete-event GSM simulator (Ch. 10.5)
-3. **Lost sales** — Alternative to backorders (Ch. 5.3.2)
+1. **Excel export** — CSV export available via `run_complete.py --export`; native `.xlsx` templates planned
+2. **Lost sales** — `(R,S)` simulation with `lost_sales=True` (§5.3.2)
+3. **GSM simulation** — `simulate_serial_gsm` (§10.5)
+
+## Agent skills
+
+Cursor / Claude skills in `.cursor/skills/`:
+
+| Skill | Chapters |
+|-------|----------|
+| `vandeput-inventory-optimization` | Overview + decision tree |
+| `vandeput-inventory-eoq-policies` | 2–5 |
+| `vandeput-inventory-service-cost` | 6–8 |
+| `vandeput-inventory-advanced` | 9–13 |
 
 ---
 

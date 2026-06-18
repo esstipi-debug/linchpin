@@ -15,8 +15,9 @@ Per Vandeput (2020), Excel is best for **visualizing results** and simple what-i
 
 ## Workflow (current)
 
-1. Run `python examples/run_part1_part2.py --simulate`
-2. Copy outputs into your own workbook, or wait for automated CSV/Excel export (roadmap)
+1. Run full analysis: `python examples/run_complete.py --simulate --export output/summary.csv`
+2. Open `output/summary.csv` in Excel for what-if and dashboards
+3. Or run part scripts: `run_part1_part2.py`, `run_part3.py`, `run_part4.py`
 
 ## Reference formulas in Excel
 

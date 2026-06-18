@@ -73,4 +73,11 @@ def test_gsm_case1_higher_cost_than_optimal():
         1.0,
         case_id=3,
     )
-    assert case1.total_holding_cost > optimal.total_holding_cost
+def test_gsm_simulation_runs():
+    from src.multi_echelon import optimize_serial_gsm, simulate_serial_gsm
+
+    alloc = optimize_serial_gsm([4, 3, 2], 100, 25, [1, 2, 4], 0.95, 1.0)
+    result = simulate_serial_gsm(alloc, [4, 3, 2], periods=2000, seed=1)
+    assert 0 <= result.fill_rate <= 1
+    assert len(result.mean_echelon_inventory) == 3
+

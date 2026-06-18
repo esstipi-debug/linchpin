@@ -26,6 +26,7 @@ from src.distributions import (
     safety_stock_gamma,
     select_distribution,
 )
+from src.export import write_policy_comparison, write_summary_csv
 from src.eoq import EOQResult, compute_eoq, total_cost
 from src.fill_rate import (
     FillRateResult,
@@ -39,11 +40,13 @@ from src.fill_rate import (
 from src.multi_echelon import (
     EchelonNode,
     GSMAllocation,
+    GSMSimulationResult,
     echelon_inventory,
     echelon_orders,
     evaluate_serial_allocation,
     optimize_serial_gsm,
     serial_gsm_cases,
+    simulate_serial_gsm,
 )
 from src.newsvendor import (
     NewsvendorResult,
@@ -73,6 +76,7 @@ __all__ = [
     "EchelonNode",
     "FillRateResult",
     "GSMAllocation",
+    "GSMSimulationResult",
     "GammaParams",
     "NewsvendorResult",
     "PolicyResult",
@@ -125,7 +129,10 @@ __all__ = [
     "service_level_factor",
     "simulate_rs_cost",
     "simulate_rs_policy",
+    "simulate_serial_gsm",
     "simulate_sq_policy",
     "sq_cost_per_year",
     "total_cost",
+    "write_policy_comparison",
+    "write_summary_csv",
 ]

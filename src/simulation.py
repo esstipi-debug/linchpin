@@ -51,6 +51,7 @@ def simulate_rs_policy(
     std_demand: float = 5.0,
     historical_demand: np.ndarray | None = None,
     seed: int | None = 42,
+    lost_sales: bool = False,
 ) -> SimulationResult:
     """
     Simulate periodic review (R, S) with backorders on net inventory.
@@ -98,8 +99,11 @@ def simulate_rs_policy(
             on_hand -= demand[t]
         else:
             short = demand[t] - on_hand
-            backorders += short
-            on_hand = 0.0
+            if lost_sales:
+                on_hand = 0.0
+            else:
+                backorders += short
+                on_hand = 0.0
 
         if t % review_period == 0:
             net_inventory = on_hand + sum(q for _, q in pipeline) - backorders

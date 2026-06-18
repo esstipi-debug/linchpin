@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.0] - 2026-06-18
+
+### Added
+- End-to-end script `examples/run_complete.py` with optional CSV export
+- CSV export layer `src/export.py` for Excel / Power BI
+- GSM discrete simulation `simulate_serial_gsm` (Ch. 10.5)
+- Lost sales mode on `(R,S)` simulation (`lost_sales=True`, §5.3.2)
+- Tests for GSM simulation and lost sales (39 total)
+
+### Changed
+- README: agent skills section, `run_complete` quick start
+- Excel templates README: CSV export workflow
+
 ## [1.0.0] - 2026-06-18
 
 ### Added

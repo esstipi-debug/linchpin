@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from itertools import product
 
 import numpy as np
-from scipy.stats import norm
 
 from src.safety_stock import service_level_factor
 
@@ -163,3 +162,78 @@ def echelon_orders(
     net_local = [on_hand + transit for on_hand, transit in zip(local_on_hand, in_transit)]
     echelon_net = echelon_inventory(net_local)
     return [max(target - net, 0.0) for target, net in zip(echelon_targets, echelon_net)]
+
+
+@dataclass(frozen=True)
+class GSMSimulationResult:
+    periods: int
+    mean_echelon_inventory: tuple[float, ...]
+    fill_rate: float
+    stockout_periods: int
+
+
+def simulate_serial_gsm(
+    allocation: GSMAllocation,
+    lead_times: list[int],
+    review_period: int = 1,
+    periods: int = 5_000,
+    *,
+    mean_demand: float = 100.0,
+    std_demand: float = 25.0,
+    seed: int | None = 42,
+) -> GSMSimulationResult:
+    """
+    Serial echelon base-stock simulation (Section 10.5).
+
+    Customer demand at the last node; periodic echelon order-up-to at each stage.
+    """
+    n = len(lead_times)
+    if n == 0 or len(allocation.echelon_order_up_to) != n:
+        raise ValueError("allocation and lead_times length mismatch")
+
+    rng = np.random.default_rng(seed)
+    demand = np.maximum(rng.normal(mean_demand, std_demand, size=periods), 0.0)
+
+    on_hand = [allocation.nodes[i].order_up_to for i in range(n)]
+    pipeline: list[list[tuple[int, float]]] = [[] for _ in range(n)]
+    echelon_sums = [0.0] * n
+    stockouts = 0
+    total_demand = 0.0
+    units_served = 0.0
+
+    for t in range(periods):
+        for i in range(n):
+            arrivals = [qty for due, qty in pipeline[i] if due == t]
+            if arrivals:
+                on_hand[i] += sum(arrivals)
+            pipeline[i] = [(due, qty) for due, qty in pipeline[i] if due != t]
+
+        transit = [sum(qty for _, qty in pipe) for pipe in pipeline]
+        net_local = [oh + tr for oh, tr in zip(on_hand, transit)]
+        echelon_net = echelon_inventory(net_local)
+        for i in range(n):
+            echelon_sums[i] += echelon_net[i]
+
+        last = n - 1
+        d = demand[t]
+        total_demand += d
+        served = min(on_hand[last], d)
+        units_served += served
+        on_hand[last] -= served
+        if on_hand[last] <= 0 and d > 0:
+            stockouts += 1
+
+        if t % review_period == 0:
+            orders = echelon_orders(on_hand, transit, allocation.echelon_order_up_to)
+            for i in range(n):
+                if orders[i] > 0:
+                    pipeline[i].append((t + lead_times[i], orders[i]))
+
+    fill_rate = units_served / total_demand if total_demand > 0 else 1.0
+    mean_echelon = tuple(s / periods for s in echelon_sums)
+    return GSMSimulationResult(
+        periods=periods,
+        mean_echelon_inventory=mean_echelon,
+        fill_rate=fill_rate,
+        stockout_periods=stockouts,
+    )
