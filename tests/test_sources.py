@@ -1,5 +1,7 @@
 """Tests for pluggable demand data sources."""
 
+import sqlite3
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -8,6 +10,7 @@ from src.sources import (
     CsvDemandSource,
     DataFrameDemandSource,
     DemandSource,
+    SqlDemandSource,
 )
 
 
@@ -66,3 +69,71 @@ def test_sources_are_interchangeable():
     assert hasattr(df_src, "list_products")
     assert hasattr(df_src, "demand_series")
     assert hasattr(df_src, "metadata")
+
+
+def _seed_sqlite() -> sqlite3.Connection:
+    conn = sqlite3.connect(":memory:")
+    conn.execute(
+        "CREATE TABLE demand (date TEXT, product_id TEXT, quantity REAL, unit_cost REAL, lead_time_days REAL)"
+    )
+    conn.executemany(
+        "INSERT INTO demand VALUES (?, ?, ?, ?, ?)",
+        [
+            ("2024-01-01", "SKU-A", 100, 50, 7),
+            ("2024-01-08", "SKU-A", 120, 50, 7),
+            ("2024-01-01", "SKU-B", 40, 10, 14),
+            ("2024-01-08", "SKU-B", 60, 10, 14),
+        ],
+    )
+    conn.commit()
+    return conn
+
+
+def test_sql_source_reads_live_connection():
+    conn = _seed_sqlite()
+    try:
+        src = SqlDemandSource(conn, table="demand")
+        assert isinstance(src, DemandSource)
+        assert src.list_products() == ["SKU-A", "SKU-B"]
+        np.testing.assert_array_equal(src.demand_series("SKU-A"), np.array([100.0, 120.0]))
+        meta = src.metadata("SKU-B")
+        assert meta.mean_demand_per_period == pytest.approx(50.0)
+        assert meta.mean_unit_cost == pytest.approx(10.0)
+    finally:
+        conn.close()
+
+
+def test_sql_source_supports_custom_query():
+    conn = _seed_sqlite()
+    try:
+        src = SqlDemandSource(
+            conn,
+            query="SELECT date, product_id, quantity FROM demand WHERE product_id = ?",
+            params=["SKU-A"],
+        )
+        assert src.list_products() == ["SKU-A"]
+    finally:
+        conn.close()
+
+
+def test_sql_source_rejects_unsafe_table_name():
+    conn = _seed_sqlite()
+    try:
+        with pytest.raises(ValueError):
+            SqlDemandSource(conn, table="demand; DROP TABLE demand")
+    finally:
+        conn.close()
+
+
+def test_sql_and_dataframe_sources_agree():
+    """The SQL adapter yields the same result as the in-memory one."""
+    conn = _seed_sqlite()
+    try:
+        sql_src = SqlDemandSource(conn, table="demand")
+        df_src = DataFrameDemandSource(_frame())
+        assert sql_src.list_products() == df_src.list_products()
+        np.testing.assert_array_equal(
+            sql_src.demand_series("SKU-A"), df_src.demand_series("SKU-A")
+        )
+    finally:
+        conn.close()

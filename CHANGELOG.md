@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.4.0] - 2026-06-19
+
+### Added
+- **`SqlDemandSource`** (`src/sources.py`): live demand from any DB-API 2.0
+  connection (SQLite, Postgres, MySQL ...) via a table name or parameterised
+  query; validates bare table names as SQL identifiers to avoid injection
+- `examples/run_sql_source.py`: live-data demo (SQLite stand-in for an ERP feed)
+  running the same source → forecast → policy chain
+- 4 SQL-adapter tests (101 total, ~91% coverage)
+
+### Changed
+- README: live SQL data path documented; ERP/WMS adapter now a thin layer
+
 ## [2.3.0] - 2026-06-19
 
 ### Added

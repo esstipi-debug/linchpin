@@ -90,6 +90,7 @@ from src.sources import (
     CsvDemandSource,
     DataFrameDemandSource,
     DemandSource,
+    SqlDemandSource,
 )
 
 __all__ = [
@@ -97,6 +98,7 @@ __all__ = [
     "CsvDemandSource",
     "DataFrameDemandSource",
     "DemandSource",
+    "SqlDemandSource",
     "InventoryItem",
     "allocate_under_budget",
     "apply_order_rules",

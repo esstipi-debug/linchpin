@@ -48,6 +48,9 @@ python examples/run_forecast_to_policy.py
 
 # Full chain: source -> forecast -> policy -> budget/MOQ constraints
 python examples/run_constrained_plan.py --budget 20000
+
+# Live data: read demand from a SQL database instead of a CSV
+python examples/run_sql_source.py
 ```
 
 Expected output includes `Q*`, reorder point `s`, order-up-to level `S`, safety stock, and simulated service levels.
@@ -73,7 +76,7 @@ Expected output includes `Q*`, reorder point `s`, order-up-to level `S`, safety 
 | Ch. 13 — Simulation optimization | `src/simulation_opt.py` | ✅ grid R + Ss |
 | Batch multi-SKU | `src/batch.py` | ✅ |
 | Demand forecasting (front-end) | `src/forecasting.py` | ✅ MA / SES / Croston + σ_e |
-| Pluggable data sources | `src/sources.py` | ✅ CSV / DataFrame (SQL/API-ready) |
+| Pluggable data sources | `src/sources.py` | ✅ CSV / DataFrame / SQL (DB-API) |
 | Business constraints | `src/constraints.py` | ✅ MOQ / case packs / shelf-life / budget |
 | Export | `excel_export`, `powerbi_export` | ✅ |
 
@@ -169,16 +172,18 @@ data source → forecast (σ_e) → (s,Q)/(R,S) policy → MOQ/case packs → bu
 src/sources.py   src/forecasting.py   src/policies.py   src/constraints.py
 ```
 
-- **Pluggable data** (`src/sources.py`): CSV today; a SQL/API/ERP adapter only
-  needs to satisfy the `DemandSource` protocol.
+- **Pluggable data** (`src/sources.py`): CSV, in-memory DataFrame, or any SQL
+  database via `SqlDemandSource` (any DB-API connection — SQLite, Postgres,
+  MySQL). New backends just satisfy the `DemandSource` protocol.
 - **Forecasting** (`src/forecasting.py`): MA / SES / Croston, exposing σ_e — the
   correct safety-stock dispersion (Vandeput 2021, §4.2.5).
 - **Constraints** (`src/constraints.py`): MOQ, case packs, shelf-life caps, and a
   budget allocator that trims safety stock across the portfolio to fit.
 
+Live data already works via `SqlDemandSource` (see `examples/run_sql_source.py`).
 Still open for a fully turnkey system:
 
-- A real ERP/WMS adapter against `DemandSource` (live data, not exports)
+- A vendor-specific ERP/WMS adapter (auth + their schema) on top of `DemandSource`
 - Capacity/volume constraints and supplier lead-time variability from live data
 - General supply networks (beyond serial GSM)
 - Advanced forecasting (seasonality, Holt-Winters, ML models)

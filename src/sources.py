@@ -15,7 +15,8 @@ A future ``SqlDemandSource`` / ``ErpDemandSource`` only needs to satisfy the
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+import re
+from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
 import pandas as pd
@@ -23,6 +24,9 @@ import pandas as pd
 from src.data_loader import ProductMetadata
 
 REQUIRED_COLUMNS = {"date", "product_id", "quantity"}
+
+# A bare table name is interpolated into SQL, so it must be a safe identifier.
+_SAFE_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 @runtime_checkable
@@ -126,6 +130,50 @@ class CsvDemandSource(_FrameDemandSource):
         default_lead_time_periods: float = 2.0,
     ) -> None:
         frame = pd.read_csv(path, parse_dates=["date"])
+        super().__init__(
+            frame,
+            periods_per_year=periods_per_year,
+            default_lead_time_periods=default_lead_time_periods,
+        )
+
+
+class SqlDemandSource(_FrameDemandSource):
+    """Demand source backed by any DB-API 2.0 connection (live data).
+
+    Pass a live connection (``sqlite3``, ``psycopg2``, ``mysql.connector`` ...)
+    and either a ``table`` name or a custom ``query`` returning at least
+    ``date``, ``product_id``, ``quantity`` (optionally ``unit_cost``,
+    ``lead_time_days``). This is the bridge from CSV exports to a live system:
+    swap the connection, keep the rest of the chain unchanged.
+
+    A bare ``table`` name is validated as a SQL identifier before interpolation;
+    for anything dynamic, pass a parameterised ``query`` + ``params`` instead.
+    """
+
+    def __init__(
+        self,
+        connection: Any,
+        *,
+        table: str = "demand",
+        query: str | None = None,
+        params: list[Any] | tuple[Any, ...] | None = None,
+        periods_per_year: float = 52.0,
+        default_lead_time_periods: float = 2.0,
+    ) -> None:
+        if query is None:
+            if not _SAFE_IDENTIFIER.match(table):
+                raise ValueError(f"unsafe table name: {table!r}")
+            query = f"SELECT * FROM {table}"  # noqa: S608 - identifier validated above
+
+        cursor = connection.cursor()
+        try:
+            cursor.execute(query, params or [])
+            columns = [desc[0] for desc in cursor.description]
+            rows = cursor.fetchall()
+        finally:
+            cursor.close()
+
+        frame = pd.DataFrame(rows, columns=columns)
         super().__init__(
             frame,
             periods_per_year=periods_per_year,
