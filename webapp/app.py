@@ -1,0 +1,280 @@
+"""FastAPI backend for the Inventory Planner — a thin layer over the engine.
+
+All numbers come from src/ (forecasting, policies, constraints). The frontend is
+a single static page; this app exposes the portfolio computation and serves it.
+
+Run:
+    py -m uvicorn webapp.app:app --reload      # from the repo root
+    # then open http://localhost:8000
+"""
+
+from __future__ import annotations
+
+import json
+import math
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+# Make `src` importable no matter where uvicorn is launched from.
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from fastapi import FastAPI, HTTPException, Query  # noqa: E402
+from fastapi.responses import FileResponse, JSONResponse  # noqa: E402
+from fastapi.staticfiles import StaticFiles  # noqa: E402
+
+from src.constraints import InventoryItem, allocate_under_budget  # noqa: E402
+from src.forecasting import ForecastResult, forecast_demand  # noqa: E402
+from src.policies import continuous_review_sq, periodic_review_rs  # noqa: E402
+from src.sources import CsvDemandSource  # noqa: E402
+
+DATA_FILE = _REPO_ROOT / "data" / "sample_demand_portfolio.csv"
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+PERIODS_PER_YEAR = 52.0
+MAX_LEAD_PERIODS = 52.0
+
+
+class SafeJSONResponse(JSONResponse):
+    """Reject non-finite floats at serialization — never emit invalid JSON."""
+
+    def render(self, content: object) -> bytes:
+        return json.dumps(content, allow_nan=False, separators=(",", ":")).encode("utf-8")
+
+
+app = FastAPI(title="Inventory Planner", version="1.0.0", default_response_class=SafeJSONResponse)
+
+
+def _reject_nonfinite(token: str) -> float:
+    raise ValueError(f"non-finite JSON token: {token}")
+
+
+@dataclass(frozen=True)
+class SkuForecast:
+    """Per-SKU data that does NOT depend on the sliders — computed once."""
+
+    product_id: str
+    forecast: ForecastResult
+    unit_cost: float
+    lead_periods: float
+    history: list[float]
+
+
+# ---- forecasts are slider-independent → compute once and cache ----------------
+
+_FORECASTS: list[SkuForecast] | None = None
+
+
+def _load_forecasts() -> list[SkuForecast]:
+    global _FORECASTS
+    if _FORECASTS is None:
+        source = CsvDemandSource(str(DATA_FILE), periods_per_year=PERIODS_PER_YEAR)
+        out: list[SkuForecast] = []
+        for pid in source.list_products():
+            series = source.demand_series(pid)
+            meta = source.metadata(pid)
+            out.append(
+                SkuForecast(
+                    product_id=pid,
+                    forecast=forecast_demand(series),
+                    unit_cost=meta.mean_unit_cost,
+                    lead_periods=meta.lead_time_periods,
+                    history=[float(x) for x in series],
+                )
+            )
+        _FORECASTS = out
+    return _FORECASTS
+
+
+def _status(forecast: ForecastResult) -> dict[str, str]:
+    if forecast.is_intermittent:
+        return {"key": "review", "label": "review"}
+    if abs(forecast.bias) >= 2:
+        return {"key": "risk", "label": "high bias"}
+    return {"key": "ok", "label": "on track"}
+
+
+def _sku_payload(
+    sf: SkuForecast,
+    *,
+    service_level: float,
+    order_cost: float,
+    holding_rate: float,
+    lead: float,
+) -> dict:
+    fc = sf.forecast
+    inputs = fc.to_engine_inputs(periods_per_year=PERIODS_PER_YEAR)
+    holding_cost = max(holding_rate * sf.unit_cost, 1e-6)
+
+    if fc.is_intermittent:
+        pol = periodic_review_rs(
+            annual_demand=inputs["annual_demand"],
+            mean_demand_per_period=inputs["mean_demand_per_period"],
+            demand_std_per_period=inputs["demand_std_per_period"],
+            holding_cost_per_unit=holding_cost,
+            fixed_order_cost=order_cost,
+            lead_time_periods=lead,
+            review_period=1.0,
+            cycle_service_level=service_level,
+        )
+        kind = "(R, S)"
+        order_quantity = None
+    else:
+        pol = continuous_review_sq(
+            annual_demand=inputs["annual_demand"],
+            mean_demand_per_period=inputs["mean_demand_per_period"],
+            demand_std_per_period=inputs["demand_std_per_period"],
+            holding_cost_per_unit=holding_cost,
+            fixed_order_cost=order_cost,
+            lead_time_periods=lead,
+            cycle_service_level=service_level,
+        )
+        kind = "(s, Q)"
+        order_quantity = pol.order_quantity
+
+    ss = pol.safety_stock.safety_stock
+    cycle_units = pol.expected_cycle_stock
+    cycle_investment = cycle_units * sf.unit_cost
+    ss_investment = ss * sf.unit_cost
+    # Reorder line for the chart/stat: mu*L + safety, on the lead-time-only risk
+    # (matches the design). For (s,Q) this equals pol.reorder_point; for (R,S) it
+    # stays distinct from order-up-to S = mu*(L+R) + safety.
+    risk_reorder = inputs["mean_demand_per_period"] * lead + ss
+
+    return {
+        "id": sf.product_id,
+        "method": fc.method,
+        "intermittent": fc.is_intermittent,
+        "forecast": fc.forecast,
+        "demand_mean": fc.demand_mean,
+        "demand_std": fc.demand_std,
+        "error_std": fc.error_std,
+        "bias": fc.bias,
+        "mae": fc.mae,
+        "unit_cost": sf.unit_cost,
+        "lead_periods": lead,
+        "policy_kind": kind,
+        "order_quantity": order_quantity,
+        "order_up_to": pol.order_up_to_level,
+        "reorder_point": risk_reorder,
+        "safety_stock": ss,
+        "z_factor": pol.safety_stock.service_level_factor,
+        "cycle_units": cycle_units,
+        "cycle_investment": cycle_investment,
+        "ss_investment": ss_investment,
+        "investment": cycle_investment + ss_investment,
+        "status": _status(fc),
+        "history": sf.history,
+    }
+
+
+def compute_portfolio(
+    *,
+    service_level: float,
+    order_cost: float,
+    holding_rate: float,
+    budget: float,
+    lead_overrides: dict[str, float],
+) -> dict:
+    forecasts = _load_forecasts()
+    skus = [
+        _sku_payload(
+            sf,
+            service_level=service_level,
+            order_cost=order_cost,
+            holding_rate=holding_rate,
+            lead=lead_overrides.get(sf.product_id, sf.lead_periods),
+        )
+        for sf in forecasts
+    ]
+
+    # Budget allocation via the real constraints engine. Map cycle stock onto an
+    # equivalent order_quantity so InventoryItem.cycle_investment matches exactly.
+    items = [
+        InventoryItem(
+            product_id=s["id"],
+            order_quantity=2.0 * s["cycle_units"],
+            safety_stock=s["safety_stock"],
+            unit_cost=s["unit_cost"],
+        )
+        for s in skus
+    ]
+    plan = allocate_under_budget(items, budget)
+    cycle_floor = sum(it.cycle_investment for it in items)
+    ss_total = sum(it.safety_investment for it in items)
+
+    n_risk = sum(1 for s in skus if s["status"]["key"] == "risk")
+    n_intermittent = sum(1 for s in skus if s["intermittent"])
+
+    return {
+        "params": {
+            "service_level": service_level,
+            "order_cost": order_cost,
+            "holding_rate": holding_rate,
+            "budget": budget,
+            "periods_per_year": PERIODS_PER_YEAR,
+        },
+        "skus": skus,
+        "totals": {
+            "requested": plan.requested_investment,
+            "cycle_floor": cycle_floor,
+            "ss_total": ss_total,
+            "scale": plan.safety_stock_scale,
+            "final": plan.final_investment,
+            "feasible": plan.feasible,
+            "headroom": budget - plan.requested_investment,
+            "n_risk": n_risk,
+            "n_intermittent": n_intermittent,
+            "n_skus": len(skus),
+        },
+    }
+
+
+@app.get("/api/portfolio")
+def api_portfolio(
+    service_level: float = Query(0.95, gt=0.0, lt=1.0),
+    order_cost: float = Query(80.0, gt=0.0),
+    holding_rate: float = Query(0.22, gt=0.0, le=2.0),
+    budget: float = Query(44000.0, ge=0.0),
+    lead_overrides: str | None = Query(None, description="JSON object {sku: lead_periods}"),
+) -> dict:
+    overrides: dict[str, float] = {}
+    if lead_overrides:
+        try:
+            raw = json.loads(lead_overrides, parse_constant=_reject_nonfinite)
+            if not isinstance(raw, dict):
+                raise ValueError("not an object")
+            for key, value in raw.items():
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    raise ValueError("values must be numbers")
+                lead = float(value)
+                if not math.isfinite(lead) or not (0 < lead <= MAX_LEAD_PERIODS):
+                    raise ValueError("lead out of range")
+                overrides[str(key)] = lead
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"lead_overrides must be a JSON object of finite numbers in (0, {MAX_LEAD_PERIODS:g}]",
+            ) from exc
+
+    return compute_portfolio(
+        service_level=service_level,
+        order_cost=order_cost,
+        holding_rate=holding_rate,
+        budget=budget,
+        lead_overrides=overrides,
+    )
+
+
+@app.get("/api/health")
+def api_health() -> dict:
+    return {"ok": True, "skus": len(_load_forecasts())}
+
+
+@app.get("/")
+def index() -> FileResponse:
+    return FileResponse(STATIC_DIR / "index.html")
+
+
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

@@ -51,6 +51,11 @@ python examples/run_constrained_plan.py --budget 20000
 
 # Live data: read demand from a SQL database instead of a CSV
 python examples/run_sql_source.py
+
+# Web UI — interactive dashboard over the engine (FastAPI, no Node)
+pip install -r webapp/requirements.txt
+python scripts/generate_portfolio.py
+python -m uvicorn webapp.app:app --reload   # http://localhost:8000
 ```
 
 Expected output includes `Q*`, reorder point `s`, order-up-to level `S`, safety stock, and simulated service levels.
@@ -179,6 +184,9 @@ src/sources.py   src/forecasting.py   src/policies.py   src/constraints.py
   correct safety-stock dispersion (Vandeput 2021, §4.2.5).
 - **Constraints** (`src/constraints.py`): MOQ, case packs, shelf-life caps, and a
   budget allocator that trims safety stock across the portfolio to fit.
+- **Web UI** (`webapp/`): a 4-tab planner dashboard (Portfolio · SKU Detail ·
+  Budget Planner · Forecast Quality) served by FastAPI over the engine — every
+  number is real, no Node/build step. See [webapp/README.md](webapp/README.md).
 
 Live data already works via `SqlDemandSource` (see `examples/run_sql_source.py`).
 Still open for a fully turnkey system:

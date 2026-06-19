@@ -1,0 +1,4 @@
+# Web UI runtime deps (the engine deps live in ../requirements.txt).
+-r ../requirements.txt
+fastapi>=0.110
+uvicorn>=0.29

@@ -1,0 +1,440 @@
+/* Inventory Planner — single-page dashboard over the real engine (/api/portfolio).
+   No build step: vanilla JS, fonts + theme in index.html. All numbers come from
+   the FastAPI backend, which runs src/ (forecasting -> policy -> constraints). */
+(function () {
+  "use strict";
+
+  // ---- state ----------------------------------------------------------------
+  var state = {
+    tab: "overview",
+    activeSkuId: "SKU-A",
+    serviceLevel: 0.95,
+    orderCost: 80,
+    holdingRate: 0.22,
+    budget: 44000,
+    leadOverride: {},
+    exported: false,
+    data: null,
+    loading: true,
+    error: null,
+  };
+
+  var root = document.getElementById("root");
+
+  // ---- formatting (matches the design) --------------------------------------
+  function fmt0(n) { return Math.round(n).toLocaleString("en-US"); }
+  function fmt1(n) {
+    return (Math.round(n * 10) / 10).toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  }
+  function money(n) { return "$" + Math.round(n).toLocaleString("en-US"); }
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+
+  var STATUS = {
+    ok: { bg: "oklch(72% 0.16 150 / 0.13)", fg: "oklch(74% 0.16 150)" },
+    risk: { bg: "oklch(68% 0.19 25 / 0.14)", fg: "oklch(72% 0.19 25)" },
+    review: { bg: "oklch(80% 0.15 85 / 0.14)", fg: "oklch(82% 0.15 85)" },
+  };
+
+  var CARD = "background:oklch(20% 0.01 260);border:1px solid oklch(26% 0.012 260);border-radius:12px";
+  var TH = "font-size:10px;font-weight:600;color:oklch(60% 0 0);text-transform:uppercase;letter-spacing:0.08em;font-family:'Inter',sans-serif";
+  var MONO = "font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums";
+
+  // ---- data fetching --------------------------------------------------------
+  function query() {
+    var p = new URLSearchParams({
+      service_level: state.serviceLevel,
+      order_cost: state.orderCost,
+      holding_rate: state.holdingRate,
+      budget: state.budget,
+    });
+    if (Object.keys(state.leadOverride).length) {
+      p.set("lead_overrides", JSON.stringify(state.leadOverride));
+    }
+    return p.toString();
+  }
+
+  function fetchData() {
+    state.loading = state.data === null;
+    if (state.loading) render();
+    return fetch("/api/portfolio?" + query())
+      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then(function (d) { state.data = d; state.error = null; state.loading = false; render(); })
+      .catch(function (e) { state.error = e.message; state.loading = false; render(); });
+  }
+
+  function activeSku() {
+    var d = state.data;
+    if (!d) return null;
+    var found = d.skus.filter(function (s) { return s.id === state.activeSkuId; })[0];
+    return found || d.skus[0];
+  }
+
+  // ---- chart (faithful port of the design's SVG builder) --------------------
+  function chartSVG(sku) {
+    var hist = sku.history, n = hist.length;
+    var W = 720, H = 240, padL = 46, padR = 110, padT = 16, padB = 26;
+    var fc = sku.forecast, errStd = sku.error_std, rop = sku.reorder_point;
+    var mean = sku.demand_mean, std = sku.demand_std;
+    var maxRaw = Math.max(Math.max.apply(null, hist), rop, fc + errStd, mean + 2 * std);
+    var maxY = maxRaw * 1.12, minY = 0;
+    var x = function (i) { return padL + (i / (n - 1)) * (W - padL - padR); };
+    var y = function (v) { return H - padB - ((v - minY) / (maxY - minY)) * (H - padT - padB); };
+    var xf = W - padR, fx2 = W - 12;
+    var p = [];
+    var ticks = 4;
+    for (var t = 0; t <= ticks; t++) {
+      var v = minY + (maxY - minY) * t / ticks, yy = y(v);
+      p.push('<line x1="' + padL + '" x2="' + fx2 + '" y1="' + yy + '" y2="' + yy + '" stroke="oklch(26% 0.012 260)" stroke-width="1"/>');
+      p.push('<text x="' + (padL - 8) + '" y="' + (yy + 3) + '" text-anchor="end" font-size="10" fill="oklch(64% 0 0)" font-family="IBM Plex Mono, monospace">' + fmt0(v) + "</text>");
+    }
+    var d = "";
+    for (var i = 0; i < n; i++) { d += (i === 0 ? "M" : "L") + x(i).toFixed(1) + " " + y(hist[i]).toFixed(1) + " "; }
+    p.push('<path d="M ' + xf + " " + y(fc + errStd) + " L " + fx2 + " " + y(fc + errStd) + " L " + fx2 + " " + y(Math.max(0, fc - errStd)) + " L " + xf + " " + y(Math.max(0, fc - errStd)) + ' Z" fill="oklch(70% 0.16 250 / 0.16)"/>');
+    p.push('<line x1="' + xf + '" x2="' + xf + '" y1="' + padT + '" y2="' + (H - padB) + '" stroke="oklch(30% 0.012 260)" stroke-width="1" stroke-dasharray="2 3"/>');
+    p.push('<line x1="' + padL + '" x2="' + fx2 + '" y1="' + y(rop) + '" y2="' + y(rop) + '" stroke="oklch(68% 0.19 25)" stroke-width="1.5" stroke-dasharray="5 4"/>');
+    p.push('<text x="' + fx2 + '" y="' + (y(rop) - 5) + '" text-anchor="end" font-size="10" fill="oklch(72% 0.19 25)" font-family="IBM Plex Mono, monospace">s=' + fmt0(rop) + "</text>");
+    p.push('<line x1="' + xf + '" x2="' + fx2 + '" y1="' + y(fc) + '" y2="' + y(fc) + '" stroke="oklch(80% 0.15 85)" stroke-width="2"/>');
+    p.push('<line x1="' + x(n - 1) + '" x2="' + xf + '" y1="' + y(hist[n - 1]) + '" y2="' + y(fc) + '" stroke="oklch(80% 0.15 85)" stroke-width="2"/>');
+    p.push('<path d="' + d.trim() + '" fill="none" stroke="oklch(70% 0.16 250)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>');
+    p.push('<circle cx="' + x(n - 1) + '" cy="' + y(hist[n - 1]) + '" r="3" fill="oklch(70% 0.16 250)"/>');
+    [0, 13, 26, 39, 51].forEach(function (i) {
+      p.push('<text x="' + x(i) + '" y="' + (H - 8) + '" text-anchor="middle" font-size="10" fill="oklch(64% 0 0)" font-family="IBM Plex Mono, monospace">w' + (i + 1) + "</text>");
+    });
+    return '<svg viewBox="0 0 ' + W + " " + H + '" width="100%" style="display:block;max-width:100%" role="img" aria-label="Demand history and forecast for ' + esc(sku.id) + '">' + p.join("") + "</svg>";
+  }
+
+  // ---- small view helpers ---------------------------------------------------
+  function chip(status) {
+    var c = STATUS[status.key];
+    return '<span style="display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:500;font-family:\'Inter\',sans-serif;background:' + c.bg + ";color:" + c.fg + '">' +
+      '<span style="width:6px;height:6px;border-radius:50%;background:' + c.fg + '"></span>' + esc(status.label) + "</span>";
+  }
+
+  function header() {
+    var d = state.data, tot = d.totals;
+    var slPct = (state.serviceLevel * 100).toFixed(0) + "%";
+    var planColor = !tot.feasible ? "oklch(72% 0.19 25)" : (tot.scale >= 1 ? "oklch(74% 0.16 150)" : "oklch(82% 0.15 85)");
+    return '<header style="display:flex;align-items:center;justify-content:space-between;gap:24px;padding:16px 28px;border-bottom:1px solid oklch(26% 0.012 260);background:oklch(17% 0.01 260);position:sticky;top:0;z-index:20">' +
+      '<div style="display:flex;align-items:center;gap:14px">' +
+      '<div style="width:30px;height:30px;border-radius:8px;background:oklch(70% 0.16 250);display:flex;align-items:center;justify-content:center;color:oklch(20% 0.02 260);font-weight:700;font-size:15px">σ</div>' +
+      '<div style="display:flex;flex-direction:column">' +
+      '<span style="font-weight:650;font-size:15px;letter-spacing:-0.01em">Inventory Planner</span>' +
+      '<span style="font-size:11px;color:oklch(60% 0 0);' + MONO + '">sample-portfolio · ' + tot.n_skus + " SKUs · (s,Q)/(R,S)</span>" +
+      "</div></div>" +
+      '<div style="display:flex;align-items:center;gap:26px;' + MONO + '">' +
+      '<div style="display:flex;flex-direction:column;align-items:flex-end">' +
+      '<span style="font-size:10px;color:oklch(60% 0 0);text-transform:uppercase;letter-spacing:0.08em;font-family:\'Inter\',sans-serif">Service level</span>' +
+      '<span style="font-size:14px;font-weight:600">' + slPct + "</span></div>" +
+      '<div style="width:1px;height:26px;background:oklch(28% 0.012 260)"></div>' +
+      '<div style="display:flex;flex-direction:column;align-items:flex-end">' +
+      '<span style="font-size:10px;color:oklch(60% 0 0);text-transform:uppercase;letter-spacing:0.08em;font-family:\'Inter\',sans-serif">Plan investment</span>' +
+      '<span style="font-size:14px;font-weight:600;color:' + planColor + '">' + money(tot.final) + "</span></div>" +
+      "</div></header>";
+  }
+
+  function nav() {
+    var tabs = [["overview", "Portfolio"], ["detail", "SKU Detail"], ["budget", "Budget Planner"], ["forecast", "Forecast Quality"]];
+    var btns = tabs.map(function (tb) {
+      var on = state.tab === tb[0];
+      return '<button data-action="tab" data-tab="' + tb[0] + '" role="tab" aria-selected="' + on + '" aria-controls="main-panel" style="background:none;border:none;border-bottom:2px solid ' + (on ? "oklch(70% 0.16 250)" : "transparent") +
+        ";color:" + (on ? "oklch(94% 0 0)" : "oklch(62% 0 0)") + ";font-family:'Inter',sans-serif;font-size:13px;font-weight:" + (on ? 600 : 500) +
+        ';padding:13px 16px;cursor:pointer;letter-spacing:-0.005em;transition:color .15s">' + tb[1] + "</button>";
+    }).join("");
+    return '<nav role="tablist" aria-label="Views" style="display:flex;gap:2px;padding:0 24px;border-bottom:1px solid oklch(26% 0.012 260);background:oklch(17% 0.01 260)">' + btns + "</nav>";
+  }
+
+  // ---- tabs -----------------------------------------------------------------
+  function overview() {
+    var d = state.data, tot = d.totals, cap = state.budget, req = tot.requested;
+    var over = req > cap;
+    var head = tot.headroom;
+    var kpis = [
+      { label: "Plan investment", value: money(req), color: over ? "oklch(72% 0.19 25)" : "oklch(74% 0.16 150)", sub: over ? "over budget" : "within budget" },
+      { label: "Budget headroom", value: (head >= 0 ? "+" : "−") + "$" + fmt0(Math.abs(head)), color: head >= 0 ? "oklch(74% 0.16 150)" : "oklch(72% 0.19 25)", sub: "cap " + money(cap) },
+      { label: "SKUs at risk", value: String(tot.n_risk), color: tot.n_risk ? "oklch(72% 0.19 25)" : "oklch(88% 0 0)", sub: "high bias / infeasible" },
+      { label: "Intermittent", value: String(tot.n_intermittent), color: "oklch(82% 0.15 85)", sub: "auto-routed to Croston" },
+    ];
+    var kpiHtml = kpis.map(function (k) {
+      return '<div style="' + CARD.replace("12px", "10px") + ';padding:16px 18px;display:flex;flex-direction:column;gap:8px">' +
+        '<span style="font-size:11px;color:oklch(64% 0 0);text-transform:uppercase;letter-spacing:0.07em;font-weight:500">' + k.label + "</span>" +
+        '<span style="font-size:30px;font-weight:600;' + MONO + ";letter-spacing:-0.02em;color:" + k.color + ';line-height:1">' + k.value + "</span>" +
+        '<span style="font-size:11px;color:oklch(64% 0 0);' + MONO + '">' + k.sub + "</span></div>";
+    }).join("");
+
+    var pct = req / cap * 100;
+    var gColor = over ? "oklch(68% 0.19 25)" : (pct > 90 ? "oklch(80% 0.15 85)" : "oklch(70% 0.16 250)");
+    var gauge = '<div style="' + CARD + ';padding:18px 20px;margin-bottom:18px">' +
+      '<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px">' +
+      '<span style="font-size:13px;font-weight:600">Budget utilization</span>' +
+      '<span style="' + MONO + ';font-size:12px;color:oklch(64% 0 0)">' + pct.toFixed(0) + "% of cap</span></div>" +
+      '<div style="height:10px;border-radius:6px;background:oklch(26% 0.012 260);overflow:hidden;position:relative">' +
+      '<div style="height:100%;border-radius:6px;width:' + Math.min(100, pct).toFixed(1) + "%;background:" + gColor + ';transition:width .5s cubic-bezier(0.16,1,0.3,1),background .3s"></div></div>' +
+      '<div style="display:flex;justify-content:space-between;margin-top:7px;' + MONO + ';font-size:11px;color:oklch(64% 0 0)"><span>requested ' + money(req) + "</span><span>cap " + money(cap) + "</span></div></div>";
+
+    var cols = ["SKU", "Method", "Fcst/wk", "Q*", "Reorder", "Safety", "Inv value", "Status"];
+    var ths = cols.map(function (c, i) {
+      var align = i >= 2 && i <= 6 ? "right" : "left";
+      var pad = i === 0 || i === 7 ? "11px 18px" : "11px 12px";
+      return '<th style="text-align:' + align + ";padding:" + pad + ";" + TH + '">' + c + "</th>";
+    }).join("");
+    var rows = d.skus.map(function (s) {
+      var c = s.intermittent ? s.order_up_to : s.order_quantity;
+      return '<tr data-action="open-sku" data-sku="' + s.id + '" data-row tabindex="0" aria-label="Open ' + s.id + '" style="border-bottom:1px solid oklch(23% 0.011 260);cursor:pointer;transition:background .12s">' +
+        '<td style="padding:12px 18px;font-weight:600;color:oklch(92% 0 0)">' + s.id + "</td>" +
+        '<td style="padding:12px 12px;color:oklch(66% 0 0);font-size:12px">' + s.method + "</td>" +
+        '<td style="padding:12px 12px;text-align:right;color:oklch(86% 0 0)">' + fmt1(s.forecast) + "</td>" +
+        '<td style="padding:12px 12px;text-align:right;color:oklch(86% 0 0)">' + fmt1(c) + "</td>" +
+        '<td style="padding:12px 12px;text-align:right;color:oklch(86% 0 0)">' + fmt0(s.reorder_point) + "</td>" +
+        '<td style="padding:12px 12px;text-align:right;color:oklch(86% 0 0)">' + fmt1(s.safety_stock) + "</td>" +
+        '<td style="padding:12px 12px;text-align:right;color:oklch(92% 0 0);font-weight:500">' + money(s.investment) + "</td>" +
+        '<td style="padding:12px 18px">' + chip(s.status) + "</td></tr>";
+    }).join("");
+    var table = '<div style="' + CARD + ';overflow:hidden"><table style="width:100%;border-collapse:collapse;' + MONO + '">' +
+      '<thead><tr style="border-bottom:1px solid oklch(26% 0.012 260)">' + ths + "</tr></thead><tbody>" + rows + "</tbody></table></div>";
+
+    return '<div class="fade-up"><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px">' + kpiHtml + "</div>" + gauge + table + "</div>";
+  }
+
+  function detail() {
+    var d = state.data, a = activeSku();
+    var leadW = state.leadOverride[a.id] != null ? state.leadOverride[a.id] : Math.round(a.lead_periods);
+    var slPct = (state.serviceLevel * 100).toFixed(0);
+    var stats = [
+      { label: a.intermittent ? "Order-up-to S" : "Order qty Q*", value: fmt1(a.intermittent ? a.order_up_to : a.order_quantity), color: "oklch(94% 0 0)", note: a.intermittent ? "periodic review R=1" : "EOQ √(2·D·K/H)", formula: a.intermittent ? "S = μ·(L+R) + safety stock" : "Q* = √(2·D·K/H)" },
+      { label: a.intermittent ? "Reorder s" : "Reorder point s", value: fmt0(a.reorder_point), color: "oklch(94% 0 0)", note: "μ·L + safety", formula: "s = μ·L + z·σ·√L  (cycle service " + slPct + "%)" },
+      { label: "Safety stock", value: fmt1(a.safety_stock), color: "oklch(80% 0.12 250)", note: "z=" + fmt1(a.z_factor) + " · σ=" + fmt1(a.error_std), formula: "SS = z · σₑ · √L   z=" + fmt1(a.z_factor) + " at SL " + slPct + "%" },
+      { label: "Forecast", value: fmt1(a.forecast), color: "oklch(94% 0 0)", note: "method " + a.method, formula: "point forecast for next period" },
+      { label: "Bias", value: (a.bias >= 0 ? "+" : "") + fmt1(a.bias), color: Math.abs(a.bias) >= 2 ? "oklch(72% 0.19 25)" : "oklch(74% 0.16 150)", note: "mean error", formula: "bias = mean(forecast − actual). |bias|≥2 flags review" },
+      { label: "MAE", value: fmt1(a.mae), color: "oklch(94% 0 0)", note: "σₑ=" + fmt1(a.error_std), formula: "MAE = mean|forecast − actual|" },
+    ];
+    var statHtml = stats.map(function (s) {
+      return '<div title="' + esc(s.formula) + '" style="' + CARD.replace("12px", "10px") + ';padding:14px 16px;display:flex;flex-direction:column;gap:5px;cursor:help">' +
+        '<span style="font-size:11px;color:oklch(64% 0 0);text-transform:uppercase;letter-spacing:0.06em;font-weight:500;display:flex;align-items:center;gap:5px">' + s.label + '<span style="opacity:0.5;font-size:10px">ⓘ</span></span>' +
+        '<span style="font-size:24px;font-weight:600;' + MONO + ";letter-spacing:-0.02em;color:" + s.color + ';line-height:1.05">' + s.value + "</span>" +
+        '<span style="font-size:10.5px;color:oklch(64% 0 0);' + MONO + '">' + esc(s.note) + "</span></div>";
+    }).join("");
+
+    var pills = d.skus.map(function (s) {
+      var on = s.id === a.id;
+      return '<button data-action="pill" data-sku="' + s.id + '" style="' + MONO + ";font-size:11px;font-weight:500;padding:5px 9px;border-radius:7px;cursor:pointer;border:1px solid " +
+        (on ? "oklch(70% 0.16 250 / 0.5)" : "oklch(28% 0.012 260)") + ";background:" + (on ? "oklch(70% 0.16 250 / 0.18)" : "oklch(24% 0.012 260)") +
+        ";color:" + (on ? "oklch(80% 0.12 250)" : "oklch(66% 0 0)") + ';transition:all .12s">' + s.id.replace("SKU-", "") + "</button>";
+    }).join("");
+
+    var legend = ['<span style="display:flex;align-items:center;gap:6px"><span style="width:14px;height:2px;background:oklch(70% 0.16 250);border-radius:2px"></span>actual</span>',
+      '<span style="display:flex;align-items:center;gap:6px"><span style="width:14px;height:2px;background:oklch(80% 0.15 85);border-radius:2px"></span>forecast</span>',
+      '<span style="display:flex;align-items:center;gap:6px"><span style="width:14px;height:9px;background:oklch(70% 0.16 250 / 0.18);border-radius:2px"></span>±σₑ</span>',
+      '<span style="display:flex;align-items:center;gap:6px"><span style="width:14px;height:0;border-top:1.5px dashed oklch(68% 0.19 25)"></span>reorder pt</span>'].join("");
+
+    var metaLine = a.method + " · μ=" + fmt1(a.demand_mean) + " σ=" + fmt1(a.demand_std) + " · unit " + money(a.unit_cost) + " · lead " + leadW + "w · " + a.policy_kind;
+
+    var whatif = [
+      { key: "serviceLevel", label: "Cycle service level", display: (state.serviceLevel * 100).toFixed(1) + "%", min: 0.8, max: 0.999, step: 0.005, value: state.serviceLevel, sku: "" },
+      { key: "lead", label: "Lead time (weeks)", display: String(leadW), min: 1, max: 6, step: 1, value: leadW, sku: a.id },
+      { key: "orderCost", label: "Order cost K ($)", display: "$" + fmt0(state.orderCost), min: 20, max: 240, step: 5, value: state.orderCost, sku: "" },
+    ];
+    var whatifHtml = whatif.map(function (w) {
+      var live = w.key === "lead" ? "lead-" + w.sku : w.key;
+      return '<div style="display:flex;flex-direction:column;gap:8px">' +
+        '<div style="display:flex;justify-content:space-between;align-items:baseline">' +
+        '<span style="font-size:12px;font-weight:500;color:oklch(80% 0 0)">' + w.label + "</span>" +
+        '<span data-live="' + live + '" style="' + MONO + ';font-size:13px;font-weight:600;color:oklch(70% 0.16 250)">' + w.display + "</span></div>" +
+        '<input type="range" data-slider="' + w.key + '" data-sku="' + w.sku + '" min="' + w.min + '" max="' + w.max + '" step="' + w.step + '" value="' + w.value + '" aria-label="' + w.label + '" style="width:100%"></div>';
+    }).join("");
+
+    var left = '<div style="display:flex;flex-direction:column;gap:18px;min-width:0">' +
+      '<div style="display:flex;align-items:flex-end;justify-content:space-between;gap:16px"><div>' +
+      '<div style="display:flex;align-items:center;gap:10px"><h2 style="margin:0;font-size:22px;font-weight:650;letter-spacing:-0.02em">' + a.id + "</h2>" + chip(a.status) + "</div>" +
+      '<span style="font-size:12px;color:oklch(62% 0 0);' + MONO + '">' + esc(metaLine) + "</span></div>" +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap">' + pills + "</div></div>" +
+      '<div style="' + CARD + ';padding:16px 18px 10px">' +
+      '<div style="display:flex;align-items:center;gap:16px;margin-bottom:10px;flex-wrap:wrap"><span style="font-size:13px;font-weight:600">Demand history &amp; forecast</span>' +
+      '<div style="display:flex;gap:14px;font-size:11px;color:oklch(64% 0 0)">' + legend + "</div></div>" +
+      '<div style="width:100%;overflow:hidden">' + chartSVG(a) + "</div></div>" +
+      '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px">' + statHtml + "</div></div>";
+
+    var aside = '<aside style="' + CARD + ';padding:18px;position:sticky;top:96px;display:flex;flex-direction:column;gap:20px">' +
+      '<div><span style="font-size:13px;font-weight:600">What-if</span><p style="margin:4px 0 0;font-size:11.5px;color:oklch(60% 0 0);line-height:1.45">Adjust assumptions — the engine recomputes the policy.</p></div>' +
+      whatifHtml +
+      '<div style="border-top:1px solid oklch(26% 0.012 260);padding-top:14px;display:flex;flex-direction:column;gap:9px">' +
+      '<div style="display:flex;justify-content:space-between;font-size:12px"><span style="color:oklch(64% 0 0)">z-factor</span><span style="' + MONO + ';font-weight:500;color:oklch(88% 0 0)">' + fmt1(a.z_factor) + " σ</span></div>" +
+      '<div style="display:flex;justify-content:space-between;font-size:12px"><span style="color:oklch(64% 0 0)">Inv. at this SKU</span><span style="' + MONO + ';font-weight:500;color:oklch(88% 0 0)">' + money(a.investment) + "</span></div></aside>";
+
+    return '<div class="fade-up" style="display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:20px;align-items:start">' + left + aside + "</div>";
+  }
+
+  function budget() {
+    var d = state.data, tot = d.totals;
+    var cycleFloor = tot.cycle_floor, req = tot.requested, scale = tot.scale, feasible = tot.feasible;
+    var floor = Math.round(cycleFloor / 250) * 250, ceil = Math.ceil(req * 1.25 / 250) * 250;
+    var maxInv = Math.max.apply(null, d.skus.map(function (s) { return s.investment; }));
+
+    var bars = d.skus.map(function (s) {
+      var cycleW = (s.cycle_investment / maxInv * 100).toFixed(1);
+      var ssW = (s.ss_investment * scale / maxInv * 100).toFixed(1);
+      var inv = s.cycle_investment + s.ss_investment * scale;
+      return '<div style="display:grid;grid-template-columns:64px 1fr 96px;gap:14px;align-items:center">' +
+        '<span style="' + MONO + ';font-size:12px;font-weight:600;color:oklch(88% 0 0)">' + s.id + "</span>" +
+        '<div style="height:18px;border-radius:5px;background:oklch(25% 0.012 260);overflow:hidden;display:flex">' +
+        '<div style="height:100%;width:' + cycleW + '%;background:oklch(70% 0.16 250 / 0.85);transition:width .55s cubic-bezier(0.16,1,0.3,1)"></div>' +
+        '<div style="height:100%;width:' + ssW + '%;background:oklch(80% 0.12 250 / 0.55);transition:width .55s cubic-bezier(0.16,1,0.3,1)"></div></div>' +
+        '<span style="' + MONO + ';font-size:12px;text-align:right;color:oklch(88% 0 0)">' + money(inv) + "</span></div>";
+    }).join("");
+
+    var banner = (function () {
+      var icon = feasible ? (scale >= 1 ? "✓" : "▲") : "✕";
+      var title = feasible ? (scale >= 1 ? "Feasible — full safety stock funded" : "Feasible — safety stock scaled to fit") : "Infeasible — cycle stock alone exceeds the cap";
+      var sub = feasible ? (scale >= 1 ? "all " + tot.n_skus + " SKUs at requested service level" : "safety stock at " + (scale * 100).toFixed(0) + "% · raise cap to " + money(req) + " for full") : "minimum cycle-stock floor is " + money(cycleFloor) + " · raise the cap";
+      var fg = feasible ? (scale >= 1 ? "oklch(76% 0.16 150)" : "oklch(82% 0.15 85)") : "oklch(74% 0.19 25)";
+      var bg = feasible ? (scale >= 1 ? "oklch(72% 0.16 150 / 0.1)" : "oklch(80% 0.15 85 / 0.1)") : "oklch(68% 0.19 25 / 0.12)";
+      var bd = feasible ? (scale >= 1 ? "oklch(72% 0.16 150 / 0.35)" : "oklch(80% 0.15 85 / 0.35)") : "oklch(68% 0.19 25 / 0.4)";
+      return '<div style="border-radius:12px;padding:14px 18px;display:flex;align-items:center;gap:12px;border:1px solid ' + bd + ";background:" + bg + '">' +
+        '<span style="font-size:18px">' + icon + "</span>" +
+        '<div style="display:flex;flex-direction:column;gap:2px"><span style="font-size:13px;font-weight:600;color:' + fg + '">' + title + "</span>" +
+        '<span style="font-size:11.5px;color:oklch(66% 0 0);' + MONO + '">' + sub + "</span></div></div>";
+    })();
+
+    var stat = function (label, value, color) {
+      return '<div style="display:flex;justify-content:space-between;font-size:12px"><span style="color:oklch(64% 0 0)">' + label + '</span><span style="' + MONO + ";font-weight:600" + (color ? ";color:" + color : "") + '">' + value + "</span></div>";
+    };
+
+    var aside = '<aside style="' + CARD + ';padding:20px;position:sticky;top:96px;display:flex;flex-direction:column;gap:20px">' +
+      '<div><span style="font-size:13px;font-weight:600">Budget &amp; constraints</span><p style="margin:4px 0 0;font-size:11.5px;color:oklch(60% 0 0);line-height:1.45">Lower the cap and watch each SKU\'s safety stock shrink toward its cycle-stock floor.</p></div>' +
+      '<div style="display:flex;flex-direction:column;gap:9px"><div style="display:flex;justify-content:space-between;align-items:baseline">' +
+      '<span style="font-size:12px;font-weight:500;color:oklch(80% 0 0)">Investment cap</span>' +
+      '<span data-live="budget" style="' + MONO + ';font-size:15px;font-weight:600;color:oklch(70% 0.16 250)">' + money(state.budget) + "</span></div>" +
+      '<input type="range" data-slider="budget" min="' + floor + '" max="' + ceil + '" step="250" value="' + state.budget + '" aria-label="Investment cap" style="width:100%">' +
+      '<div style="display:flex;justify-content:space-between;' + MONO + ';font-size:10.5px;color:oklch(64% 0 0)"><span>' + money(floor) + "</span><span>" + money(ceil) + "</span></div></div>" +
+      '<div style="display:flex;flex-direction:column;gap:9px"><div style="display:flex;justify-content:space-between;align-items:baseline">' +
+      '<span style="font-size:12px;font-weight:500;color:oklch(80% 0 0)">Service level</span>' +
+      '<span data-live="serviceLevel" style="' + MONO + ';font-size:13px;font-weight:600;color:oklch(70% 0.16 250)">' + (state.serviceLevel * 100).toFixed(1) + "%</span></div>" +
+      '<input type="range" data-slider="serviceLevel" min="0.80" max="0.999" step="0.005" value="' + state.serviceLevel + '" aria-label="Service level" style="width:100%"></div>' +
+      '<div style="border-top:1px solid oklch(26% 0.012 260);padding-top:16px;display:flex;flex-direction:column;gap:11px">' +
+      stat("Requested", money(req)) + stat("Cycle-stock floor", money(cycleFloor), "oklch(72% 0.19 25)") +
+      stat("Safety-stock scale", (scale * 100).toFixed(0) + "%", "oklch(80% 0.12 250)") + stat("Final investment", money(tot.final), "oklch(74% 0.16 150)") + "</div>" +
+      '<button data-action="export" style="margin-top:2px;border:1px solid oklch(70% 0.16 250 / 0.5);background:oklch(70% 0.16 250 / 0.14);color:oklch(82% 0.12 250);font-size:13px;font-weight:600;padding:10px;border-radius:9px;cursor:pointer;transition:background .15s">' +
+      (state.exported ? "✓ plan exported (CSV)" : "Commit &amp; export plan (CSV)") + "</button></aside>";
+
+    var right = '<div style="display:flex;flex-direction:column;gap:16px;min-width:0">' + banner +
+      '<div style="' + CARD + ';padding:18px 20px;display:flex;flex-direction:column;gap:14px">' +
+      '<span style="font-size:12px;font-weight:600;color:oklch(80% 0 0)">Allocation by SKU — <span style="color:oklch(70% 0.16 250)">cycle</span> + <span style="color:oklch(80% 0.12 250)">safety</span></span>' +
+      bars + "</div></div>";
+
+    return '<div class="fade-up" style="display:grid;grid-template-columns:340px minmax(0,1fr);gap:22px;align-items:start">' + aside + right + "</div>";
+  }
+
+  function forecast() {
+    var d = state.data;
+    var cols = ["SKU", "Method", "Bias", "Bias spread", "MAE", "σₑ", "Flag"];
+    var ths = cols.map(function (c, i) {
+      var align = i === 2 || i === 4 || i === 5 ? "right" : "left";
+      var pad = i === 0 || i === 6 ? "11px 18px" : "11px 12px";
+      return '<th style="text-align:' + align + ";padding:" + pad + ";" + TH + '">' + c + "</th>";
+    }).join("");
+    var rows = d.skus.map(function (s) {
+      var biasColor = Math.abs(s.bias) >= 2 ? "oklch(72% 0.19 25)" : (Math.abs(s.bias) >= 1 ? "oklch(82% 0.15 85)" : "oklch(74% 0.16 150)");
+      var markerLeft = (50 + Math.max(-48, Math.min(48, s.bias / 4 * 48))).toFixed(1);
+      var flag = s.intermittent ? "Croston · intermittent" : (Math.abs(s.bias) >= 2 ? "high bias" : "healthy");
+      return '<tr data-action="open-sku" data-sku="' + s.id + '" data-row tabindex="0" aria-label="Open ' + s.id + '" style="border-bottom:1px solid oklch(23% 0.011 260);cursor:pointer;transition:background .12s">' +
+        '<td style="padding:12px 18px;font-weight:600;color:oklch(92% 0 0)">' + s.id + "</td>" +
+        '<td style="padding:12px 12px;color:oklch(66% 0 0);font-size:12px">' + s.method + "</td>" +
+        '<td style="padding:12px 12px;text-align:right;color:' + biasColor + ';font-weight:500">' + (s.bias >= 0 ? "+" : "") + fmt1(s.bias) + "</td>" +
+        '<td style="padding:12px 12px"><div style="position:relative;height:8px;width:120px;border-radius:4px;background:oklch(25% 0.012 260)">' +
+        '<div style="position:absolute;top:0;bottom:0;left:50%;width:1px;background:oklch(40% 0.012 260)"></div>' +
+        '<div style="position:absolute;top:-1px;width:10px;height:10px;border-radius:50%;left:' + markerLeft + '%;background:' + biasColor + ';transform:translateX(-50%)"></div></div></td>' +
+        '<td style="padding:12px 12px;text-align:right;color:oklch(86% 0 0)">' + fmt1(s.mae) + "</td>" +
+        '<td style="padding:12px 12px;text-align:right;color:oklch(86% 0 0)">' + fmt1(s.error_std) + "</td>" +
+        '<td style="padding:12px 18px">' + chip({ key: s.status.key, label: flag }) + "</td></tr>";
+    }).join("");
+    return '<div class="fade-up" style="' + CARD + ';overflow:hidden"><table style="width:100%;border-collapse:collapse;' + MONO + '">' +
+      '<thead><tr style="border-bottom:1px solid oklch(26% 0.012 260)">' + ths + "</tr></thead><tbody>" + rows + "</tbody></table></div>";
+  }
+
+  // ---- render ---------------------------------------------------------------
+  function shell(inner) {
+    return '<div style="min-height:100vh;background:oklch(15% 0.01 260);color:oklch(94% 0 0)">' + inner + "</div>";
+  }
+
+  var TAB_LABELS = { overview: "Portfolio", detail: "SKU Detail", budget: "Budget Planner", forecast: "Forecast Quality" };
+
+  function focusKey(el) {
+    if (!el || el === document.body) return null;
+    var d = el.dataset || {};
+    if (d.slider != null) return '[data-slider="' + d.slider + '"]' + (d.sku ? '[data-sku="' + d.sku + '"]' : "");
+    if (d.action) return '[data-action="' + d.action + '"]' + (d.tab ? '[data-tab="' + d.tab + '"]' : "") + (d.sku ? '[data-sku="' + d.sku + '"]' : "");
+    return null;
+  }
+
+  function announce(msg) {
+    var n = document.getElementById("sr-status");
+    if (n && n.textContent !== msg) n.textContent = msg;
+  }
+
+  function render() {
+    var fk = focusKey(document.activeElement); // preserve focus across the re-render (WCAG 2.4.3)
+
+    if (state.error) {
+      root.innerHTML = shell('<div role="alert" style="padding:80px 28px;text-align:center"><div style="font-size:15px;font-weight:600;color:oklch(74% 0.19 25)">Could not reach the engine</div>' +
+        '<div style="font-size:12px;color:oklch(64% 0 0);' + MONO + ';margin-top:8px">' + esc(state.error) + "</div>" +
+        '<button data-action="retry" style="margin-top:18px;border:1px solid oklch(70% 0.16 250 / 0.5);background:oklch(70% 0.16 250 / 0.14);color:oklch(82% 0.12 250);font-size:13px;font-weight:600;padding:9px 16px;border-radius:9px;cursor:pointer">Retry</button></div>');
+      announce("Error reaching the engine: " + state.error);
+    } else if (!state.data) {
+      root.innerHTML = shell('<div role="status" style="padding:120px 28px;text-align:center;color:oklch(64% 0 0);font-size:13px;' + MONO + '">Loading portfolio from the engine…</div>');
+    } else if (!state.data.skus.length) {
+      root.innerHTML = shell(header() + nav() + '<main id="main-panel" role="tabpanel" style="padding:24px 28px 64px"><div role="status" style="padding:80px 28px;text-align:center;color:oklch(64% 0 0);font-size:13px">No SKUs in this portfolio.</div></main>');
+      announce("No SKUs in this portfolio");
+    } else {
+      var main = state.tab === "overview" ? overview() : state.tab === "detail" ? detail() : state.tab === "budget" ? budget() : forecast();
+      root.innerHTML = shell(header() + nav() + '<main id="main-panel" role="tabpanel" aria-label="' + TAB_LABELS[state.tab] + '" style="padding:24px 28px 64px">' + main + "</main>");
+      announce(TAB_LABELS[state.tab] + (state.tab === "detail" ? " — " + state.activeSkuId : "") + (state.exported ? " · plan exported" : ""));
+    }
+
+    if (fk) { var t = root.querySelector(fk); if (t && t.focus) t.focus({ preventScroll: true }); }
+  }
+
+  // ---- events ---------------------------------------------------------------
+  function liveFormat(key, value) {
+    if (key === "serviceLevel") return (value * 100).toFixed(1) + "%";
+    if (key === "orderCost") return "$" + fmt0(value);
+    if (key === "budget") return money(value);
+    return String(value);
+  }
+
+  root.addEventListener("click", function (e) {
+    var t = e.target.closest("[data-action]");
+    if (!t) return;
+    var a = t.dataset.action;
+    if (a === "tab") { state.tab = t.dataset.tab; render(); }
+    else if (a === "open-sku") { state.tab = "detail"; state.activeSkuId = t.dataset.sku; render(); }
+    else if (a === "pill") { state.activeSkuId = t.dataset.sku; render(); }
+    else if (a === "export") { state.exported = true; render(); }
+    else if (a === "retry") { state.error = null; fetchData(); }
+  });
+
+  root.addEventListener("keydown", function (e) {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    var t = e.target.closest('[data-row],[data-action="tab"]');
+    if (t) { e.preventDefault(); t.click(); }
+  });
+
+  // live label update while dragging (no fetch)
+  root.addEventListener("input", function (e) {
+    var el = e.target;
+    if (!el.dataset || el.dataset.slider == null) return;
+    var key = el.dataset.slider, v = parseFloat(el.value);
+    if (key === "serviceLevel") state.serviceLevel = v;
+    else if (key === "orderCost") state.orderCost = v;
+    else if (key === "budget") state.budget = v;
+    else if (key === "lead") { state.leadOverride[el.dataset.sku] = parseInt(el.value, 10); }
+    var live = key === "lead" ? "lead-" + el.dataset.sku : key;
+    var labelText = key === "lead" ? el.value : liveFormat(key, v);
+    Array.prototype.forEach.call(document.querySelectorAll('[data-live="' + live + '"]'), function (n) { n.textContent = labelText; });
+  });
+
+  // commit + recompute from the engine on release
+  root.addEventListener("change", function (e) {
+    if (e.target.dataset && e.target.dataset.slider != null) { state.exported = false; fetchData(); }
+  });
+
+  fetchData();
+})();

@@ -1,6 +1,20 @@
 # Changelog
 
-## [2.4.0] - 2026-06-19
+## [2.5.0] - 2026-06-19
+
+### Added
+- **Inventory Planner web UI** (`webapp/`): a 4-tab dashboard (Portfolio, SKU
+  Detail with demand/forecast chart, Budget Planner, Forecast Quality) served by
+  FastAPI over the engine — every number comes from `src/`. Vanilla JS, no Node /
+  build step; one `uvicorn` command
+- `GET /api/portfolio` runs forecasting → policy → constraints with live
+  what-if params (service level, lead time, order cost, budget); validated inputs
+- `scripts/generate_portfolio.py` seeds an 8-SKU demand portfolio
+- `tests/test_webapp.py` (9 tests, 110 total) via FastAPI TestClient
+- Screenshots in `webapp/screenshots/`
+
+### Changed
+- `requirements-dev.txt`: add fastapi / uvicorn / httpx for the web UI + its tests
 
 ### Added
 - **`SqlDemandSource`** (`src/sources.py`): live demand from any DB-API 2.0
