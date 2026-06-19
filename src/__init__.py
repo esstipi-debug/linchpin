@@ -1,5 +1,14 @@
 """Inventory optimization models based on Vandeput (2020)."""
 
+from src.constraints import (
+    BudgetAllocation,
+    InventoryItem,
+    allocate_under_budget,
+    apply_order_rules,
+    round_up_to_multiple,
+    shelf_life_max_quantity,
+    total_investment,
+)
 from src.cost_optimization import (
     CostBreakdown,
     RSOptimizationResult,
@@ -77,8 +86,23 @@ from src.simulation_opt import (
     optimize_rs_simulation,
     simulate_rs_cost,
 )
+from src.sources import (
+    CsvDemandSource,
+    DataFrameDemandSource,
+    DemandSource,
+)
 
 __all__ = [
+    "BudgetAllocation",
+    "CsvDemandSource",
+    "DataFrameDemandSource",
+    "DemandSource",
+    "InventoryItem",
+    "allocate_under_budget",
+    "apply_order_rules",
+    "round_up_to_multiple",
+    "shelf_life_max_quantity",
+    "total_investment",
     "CostBreakdown",
     "DemandDistribution",
     "DiscretePMF",

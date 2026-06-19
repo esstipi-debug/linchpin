@@ -45,6 +45,9 @@ python examples/build_powerbi_dataset.py --simulate
 
 # Forecast demand from history, then derive the policy (uses sigma_e)
 python examples/run_forecast_to_policy.py
+
+# Full chain: source -> forecast -> policy -> budget/MOQ constraints
+python examples/run_constrained_plan.py --budget 20000
 ```
 
 Expected output includes `Q*`, reorder point `s`, order-up-to level `S`, safety stock, and simulated service levels.
@@ -70,6 +73,8 @@ Expected output includes `Q*`, reorder point `s`, order-up-to level `S`, safety 
 | Ch. 13 — Simulation optimization | `src/simulation_opt.py` | ✅ grid R + Ss |
 | Batch multi-SKU | `src/batch.py` | ✅ |
 | Demand forecasting (front-end) | `src/forecasting.py` | ✅ MA / SES / Croston + σ_e |
+| Pluggable data sources | `src/sources.py` | ✅ CSV / DataFrame (SQL/API-ready) |
+| Business constraints | `src/constraints.py` | ✅ MOQ / case packs / shelf-life / budget |
 | Export | `excel_export`, `powerbi_export` | ✅ |
 
 ---
@@ -156,15 +161,27 @@ Ss = z_alpha * sigma_d * sqrt(tau)
 
 ## From engine to product ("the AUTO")
 
-This repo is the analytical **engine**. `src/forecasting.py` adds the demand
-front-end (history → forecast → σ_e → policy; see `examples/run_forecast_to_policy.py`).
-What still separates it from a turnkey planning system:
+The analytical **engine** (Ch. 1–13) now has the chassis around it. The full
+chain runs end to end — `examples/run_constrained_plan.py`:
 
-- Live data integration (ERP/WMS connector instead of CSV loads)
-- Business constraints (budget, warehouse capacity, MOQ, shelf-life)
+```
+data source → forecast (σ_e) → (s,Q)/(R,S) policy → MOQ/case packs → budget fit
+src/sources.py   src/forecasting.py   src/policies.py   src/constraints.py
+```
+
+- **Pluggable data** (`src/sources.py`): CSV today; a SQL/API/ERP adapter only
+  needs to satisfy the `DemandSource` protocol.
+- **Forecasting** (`src/forecasting.py`): MA / SES / Croston, exposing σ_e — the
+  correct safety-stock dispersion (Vandeput 2021, §4.2.5).
+- **Constraints** (`src/constraints.py`): MOQ, case packs, shelf-life caps, and a
+  budget allocator that trims safety stock across the portfolio to fit.
+
+Still open for a fully turnkey system:
+
+- A real ERP/WMS adapter against `DemandSource` (live data, not exports)
+- Capacity/volume constraints and supplier lead-time variability from live data
 - General supply networks (beyond serial GSM)
-- Policies driven end-to-end from KDE/discrete PMF (Ch. 12 → 5)
-- Advanced forecasting (seasonality, trend/Holt-Winters, ML models)
+- Advanced forecasting (seasonality, Holt-Winters, ML models)
 
 ## Agent skills (Cursor + Claude Code)
 

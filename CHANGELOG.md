@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.3.0] - 2026-06-19
+
+### Added
+- **Pluggable data sources** (`src/sources.py`): `DemandSource` protocol with
+  `CsvDemandSource` and `DataFrameDemandSource` adapters — the engine is no
+  longer hard-wired to CSV; a SQL/API/ERP adapter just satisfies the protocol
+- **Business constraints** (`src/constraints.py`): MOQ, case-pack rounding,
+  shelf-life caps, and `allocate_under_budget` — a portfolio budget allocator
+  that trims safety stock to fit while preserving cycle-stock economics
+- `examples/run_constrained_plan.py`: full chain source → forecast → policy →
+  constraints
+- 14 tests (97 total, ~91% coverage)
+
+### Changed
+- README: "engine → product" section now reflects the assembled AUTO chain
+
 ## [2.2.0] - 2026-06-19
 
 ### Added
