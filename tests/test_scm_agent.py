@@ -1,8 +1,11 @@
 """Tests for the scm_agent orchestrator package."""
 
+from pathlib import Path
+
 import pytest
 
 from scm_agent import intent, llm, tools
+from scm_agent.orchestrator import Orchestrator
 from scm_agent.registry import Prepared, Produced, Tool, ToolRegistry
 from scm_agent.types import JobRequest, JobResult
 
@@ -239,3 +242,82 @@ def test_leadership_tool_scores_via_llm_provider():
     assert prep.status == "ok"
     assert prep.payload.scores == {"C": 3, "H": 2, "A": 3, "I": 1, "N": 1}
     assert prep.payload.evidence["C"] == "convoca a otras áreas"
+
+
+# ---------------------------------------------------------------------------
+# Task 9 — orchestrator.py + __init__.py exports
+# ---------------------------------------------------------------------------
+
+
+def _rules_orch():
+    from scm_agent import llm
+    return Orchestrator(registry=tools.build_default_registry(), provider=llm.RulesFallback())
+
+
+def test_orchestrator_inventory_end_to_end(tmp_path):
+    res = _rules_orch().run("set up reorder points and safety stock", data_path=PORTFOLIO,
+                            client="Acme", out_dir=tmp_path)
+    assert res.status == "ok"
+    assert res.tool == "inventory_optimization"
+    assert "excel" in res.deliverables and Path(res.deliverables["excel"]).exists()
+
+
+def test_orchestrator_pricing_end_to_end(tmp_path):
+    res = _rules_orch().run("what price maximizes profit", data_path=PRICING_CSV, out_dir=tmp_path)
+    assert res.status == "ok" and res.tool == "pricing"
+    assert Path(res.deliverables["report"]).exists()
+
+
+def test_orchestrator_leadership_via_params(tmp_path):
+    res = _rules_orch().run("evaluate our SC leadership", overrides={"scores": "3 2 3 1 1", "name": "Equipo X"},
+                            out_dir=tmp_path)
+    assert res.status == "ok" and res.tool == "leadership_chain"
+    assert Path(res.deliverables["chart"]).exists()
+    assert Path(res.deliverables["report"]).exists()
+
+
+def test_orchestrator_needs_data_when_required_file_missing(tmp_path):
+    res = _rules_orch().run("set up reorder points", out_dir=tmp_path)
+    assert res.status == "needs_data" and res.tool == "inventory_optimization"
+
+
+def test_orchestrator_needs_clarification_on_ambiguous_brief(tmp_path):
+    res = _rules_orch().run("help me with my supply chain", out_dir=tmp_path)
+    assert res.status == "needs_clarification"
+    assert res.clarifications
+
+
+def test_orchestrator_leadership_needs_clarification_without_scores(tmp_path):
+    res = _rules_orch().run("how strong is our leadership?", out_dir=tmp_path)
+    assert res.status == "needs_clarification"
+    assert len(res.clarifications) >= 10
+
+
+def test_orchestrator_qa_failed_writes_no_deliverables(tmp_path):
+    orch = _rules_orch()
+    tool = orch.registry.get("leadership_chain")
+    # Tool is a frozen dataclass; bypass __setattr__ to force a QA failure
+    # (same trick the existing jobs tests use on frozen records).
+    object.__setattr__(tool, "qa", lambda report: ["forced issue"])
+    res = orch.run("evaluate leadership", overrides={"scores": "3 2 3 1 1"}, out_dir=tmp_path)
+    assert res.status == "qa_failed"
+    assert res.qa_issues == ["forced issue"]
+    assert res.deliverables == {}
+
+
+def test_orchestrator_narrative_upgrade_with_provider(tmp_path):
+    prov = _FakeProvider(complete_text="Upgraded narrative.", available=True)
+    orch = Orchestrator(registry=tools.build_default_registry(), provider=prov)
+    res = orch.run("evaluate leadership", overrides={"scores": "3 2 3 1 1"}, job_type="leadership_chain",
+                   out_dir=tmp_path)
+    assert res.status == "ok"
+    assert res.summary == "Upgraded narrative."
+
+
+def test_package_exports():
+    import scm_agent
+    assert hasattr(scm_agent, "Orchestrator")
+    assert hasattr(scm_agent, "JobRequest")
+    assert hasattr(scm_agent, "JobResult")
+    assert hasattr(scm_agent, "build_default_registry")
+    assert hasattr(scm_agent, "get_provider")
