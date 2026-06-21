@@ -13,7 +13,7 @@
 These apply to **every** task. Copy them verbatim into your working memory.
 
 - **Python ≥ 3.11.** Use `from __future__ import annotations` at the top of every new module (matches the codebase).
-- **Interpreter:** the `py` launcher has all deps (Python 3.13 + pandas/scipy/fastapi/anthropic-if-installed). The `uv` graphify interpreter does NOT. Run everything with `py`.
+- **Interpreter:** use `py` — verified to resolve to `…\Programs\Python\Python313\python.exe` with numpy/pandas/scipy/matplotlib/openpyxl/pytest/fastapi installed. Confirm with `py -c "import pandas, matplotlib, scipy"`; if that ever fails, use `py -3.13` (same install). **Do NOT use bare `python` or `python3`** — those resolve to a venv / Windows Store Python WITHOUT the scientific stack. `anthropic` is intentionally NOT installed in `py`'s env: the agent must run (and all tests must pass) without it via `RulesFallback`. On Windows set `PYTHONUTF8=1` only if a script prints non-ASCII to the console; repo code writes files with `encoding="utf-8"`, so the suite itself does not need it.
 - **Immutability / types:** public DTOs are `@dataclass(frozen=True)`; type-annotate every function signature (PEP 8). Prefer many small focused modules.
 - **ruff:** `target-version = py311`, `line-length = 120`, `select = ["E","F","I"]`, `ignore = ["E501"]`. Keep imports isort-clean. New top-level package `scm_agent` must be added to the lint command.
 - **Coverage gate:** `[tool.coverage.run] source = ["src"]`, `fail_under = 80`. New code lives in `scm_agent/`, `jobs/`, `webapp/`, `examples/` — none measured — so the gate stays green as long as you don't break `src`. Do not modify `src/`.
