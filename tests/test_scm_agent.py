@@ -2,7 +2,7 @@
 
 import pytest
 
-from scm_agent import llm
+from scm_agent import llm, tools
 from scm_agent.registry import Prepared, Produced, Tool, ToolRegistry
 from scm_agent.types import JobRequest, JobResult
 
@@ -101,3 +101,72 @@ def test_registry_match_scores_by_keyword_hits():
     assert ranked[0][0].key == "inventory_optimization"
     assert ranked[0][1] >= 3  # three keyword hits
     assert ranked[1][1] == 0  # pricing has no hits
+
+
+# ---------------------------------------------------------------------------
+# Task 7 — tools.py
+# ---------------------------------------------------------------------------
+
+PORTFOLIO = "data/sample_demand_portfolio.csv"
+PRICING_CSV = "data/sample_pricing.csv"
+
+
+def test_build_default_registry_has_three_tools():
+    reg = tools.build_default_registry()
+    keys = {t.key for t in reg.list()}
+    assert keys == {"inventory_optimization", "pricing", "leadership_chain"}
+    assert reg.get("leadership_chain").requires_data is False
+    assert reg.get("inventory_optimization").requires_data is True
+
+
+def test_inventory_tool_pipeline_on_sample(tmp_path):
+    from scm_agent import llm
+    t = tools.inventory_tool()
+    req = JobRequest(brief="reorder points", data_path=PORTFOLIO)
+    prep = t.prepare(req, llm.RulesFallback())
+    assert prep.status == "ok"
+    produced = t.run(prep.payload, {})
+    assert t.qa(produced.report) == []
+    written = t.deliver(produced.report, tmp_path, "Acme")
+    assert written["excel"].exists() and written["report"].exists()
+
+
+def test_inventory_tool_reports_needs_data_when_columns_undetectable(tmp_path):
+    from scm_agent import llm
+    bad = tmp_path / "bad.csv"
+    bad.write_text("foo,bar\n1,2\n", encoding="utf-8")
+    t = tools.inventory_tool()
+    prep = t.prepare(JobRequest(brief="reorder", data_path=str(bad)), llm.RulesFallback())
+    assert prep.status == "needs_data"
+    assert prep.messages
+
+
+def test_pricing_tool_pipeline_on_sample(tmp_path):
+    from scm_agent import llm
+    t = tools.pricing_tool()
+    prep = t.prepare(JobRequest(brief="optimal price", data_path=PRICING_CSV), llm.RulesFallback())
+    assert prep.status == "ok"
+    produced = t.run(prep.payload, {})
+    assert t.qa(produced.report) == []
+    written = t.deliver(produced.report, tmp_path, "Acme")
+    assert written["excel"].exists()
+
+
+def test_leadership_tool_with_scores_in_params(tmp_path):
+    from scm_agent import llm
+    t = tools.leadership_tool()
+    req = JobRequest(brief="evaluate our SC leadership", params={"scores": "3 2 3 1 1", "name": "Equipo X"})
+    prep = t.prepare(req, llm.RulesFallback())
+    assert prep.status == "ok"
+    produced = t.run(prep.payload, {})
+    assert t.qa(produced.report) == []
+    written = t.deliver(produced.report, tmp_path, "Acme")
+    assert written["chart"].exists() and written["report"].exists()
+
+
+def test_leadership_tool_needs_clarification_without_scores_or_llm():
+    from scm_agent import llm
+    t = tools.leadership_tool()
+    prep = t.prepare(JobRequest(brief="how is my leadership?"), llm.RulesFallback())
+    assert prep.status == "needs_clarification"
+    assert len(prep.messages) >= 10  # the diagnostic questions
