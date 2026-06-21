@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,6 +36,9 @@ DATA_FILE = _REPO_ROOT / "data" / "sample_demand_portfolio.csv"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 JOBS_OUTPUT_DIR = _REPO_ROOT / "webapp" / "_jobs_output"
 JOBS_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+# NOTE: per-job output dirs under JOBS_OUTPUT_DIR are NOT auto-cleaned (demo scope).
+# A deployment should add a TTL sweep / cleanup job.
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # cap /api/jobs uploads at 25 MB
 PERIODS_PER_YEAR = 52.0
 MAX_LEAD_PERIODS = 52.0
 
@@ -304,8 +308,19 @@ async def api_jobs(
     job_dir = Path(tempfile.mkdtemp(dir=JOBS_OUTPUT_DIR))
     data_path: str | None = None
     if file is not None and file.filename:
-        upload = job_dir / file.filename
-        upload.write_bytes(await file.read())
+        # Never trust the client-supplied filename: reduce to a bare basename and
+        # pin the write inside the per-job dir (blocks path traversal / absolute writes).
+        raw_name = (file.filename or "upload").replace("\\", "/")
+        safe_name = os.path.basename(raw_name)
+        if not safe_name or safe_name in (".", ".."):
+            raise HTTPException(status_code=400, detail="invalid upload filename")
+        upload = job_dir / safe_name
+        if upload.resolve().parent != job_dir.resolve():
+            raise HTTPException(status_code=400, detail="invalid upload filename")
+        data = await file.read(MAX_UPLOAD_BYTES + 1)
+        if len(data) > MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail=f"upload exceeds {MAX_UPLOAD_BYTES} bytes")
+        upload.write_bytes(data)
         data_path = str(upload)
 
     result = _get_orchestrator().run(

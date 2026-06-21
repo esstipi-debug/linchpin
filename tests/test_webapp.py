@@ -5,7 +5,7 @@ import pytest
 pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
-from webapp.app import app  # noqa: E402
+from webapp.app import JOBS_OUTPUT_DIR, app  # noqa: E402
 
 client = TestClient(app)
 
@@ -177,3 +177,30 @@ def test_jobs_downloaded_file_is_served():
     got = client.get(url)
     assert got.status_code == 200
     assert "CHAIN" in got.text
+
+
+@requires_multipart
+def test_jobs_upload_filename_traversal_is_contained():
+    # A path-traversal filename must be reduced to a basename and written ONLY
+    # inside the per-job mkdtemp subdir — never escaping JOBS_OUTPUT_DIR.
+    csv = b"date,sku,qty\n2024-01-01,A,5\n"
+    r = client.post(
+        "/api/jobs",
+        data={"brief": "set up reorder points and safety stock"},
+        files={"file": ("../../evil_traversal.csv", csv, "text/csv")},
+    )
+    assert r.status_code == 200  # handled gracefully, not a 5xx
+    assert not (JOBS_OUTPUT_DIR / "evil_traversal.csv").exists()
+    assert not (JOBS_OUTPUT_DIR.parent / "evil_traversal.csv").exists()
+
+
+@requires_multipart
+def test_jobs_upload_too_large_rejected(monkeypatch):
+    monkeypatch.setattr("webapp.app.MAX_UPLOAD_BYTES", 100)
+    big = b"x" * 200
+    r = client.post(
+        "/api/jobs",
+        data={"brief": "set up reorder points"},
+        files={"file": ("big.csv", big, "text/csv")},
+    )
+    assert r.status_code == 413
