@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.8.0] - 2026-06-21
+
+### Added
+- `scm_agent` orchestrator: routes a free-form brief (+ optional data) to a capability and drives prepare → run → QA → deliver.
+- `leadership_chain` capability (CHAIN model): score + radar chart + active directives; `jobs/leadership.py`.
+- Pluggable `LLMProvider` (Claude when `ANTHROPIC_API_KEY` is set, rules fallback otherwise).
+- CLI `examples/run_agent.py` and `POST /api/jobs` HTTP endpoint with downloadable deliverables.
+- Optional `llm` and `web` dependency extras.
+
 ## [2.7.0] - 2026-06-19
 
 ### Added
