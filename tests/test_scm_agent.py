@@ -2,7 +2,7 @@
 
 import pytest
 
-from scm_agent import llm, tools
+from scm_agent import intent, llm, tools
 from scm_agent.registry import Prepared, Produced, Tool, ToolRegistry
 from scm_agent.types import JobRequest, JobResult
 
@@ -170,3 +170,72 @@ def test_leadership_tool_needs_clarification_without_scores_or_llm():
     prep = t.prepare(JobRequest(brief="how is my leadership?"), llm.RulesFallback())
     assert prep.status == "needs_clarification"
     assert len(prep.messages) >= 10  # the diagnostic questions
+
+
+# ---------------------------------------------------------------------------
+# Task 8 — intent.py
+# ---------------------------------------------------------------------------
+
+
+class _FakeProvider:
+    def __init__(self, *, extract_obj=None, complete_text="", available=True):
+        self._extract = extract_obj or {}
+        self._complete = complete_text
+        self._available = available
+
+    def available(self):
+        return self._available
+
+    def complete(self, prompt):
+        return self._complete
+
+    def extract(self, prompt, schema):
+        return dict(self._extract)
+
+
+def test_classify_routes_inventory_brief():
+    reg = tools.build_default_registry()
+    res = intent.classify("set up reorder points and safety stock", reg, _FakeProvider(available=False))
+    assert res.job_type == "inventory_optimization"
+    assert res.confidence > 0
+
+
+def test_classify_routes_pricing_and_leadership():
+    reg = tools.build_default_registry()
+    p = _FakeProvider(available=False)
+    assert intent.classify("what price maximizes profit", reg, p).job_type == "pricing"
+    assert intent.classify("evaluate our supply chain leadership (CHAIN)", reg, p).job_type == "leadership_chain"
+
+
+def test_classify_override_wins():
+    reg = tools.build_default_registry()
+    res = intent.classify("anything", reg, _FakeProvider(available=False), job_type_override="pricing")
+    assert res.job_type == "pricing" and res.confidence == 1.0
+
+
+def test_classify_ambiguous_without_llm_returns_candidates():
+    reg = tools.build_default_registry()
+    res = intent.classify("help me with my supply chain", reg, _FakeProvider(available=False))
+    assert res.job_type is None
+    assert res.candidates  # something to disambiguate
+
+
+def test_classify_uses_llm_when_rules_are_ambiguous():
+    reg = tools.build_default_registry()
+    prov = _FakeProvider(extract_obj={"job_type": "pricing"}, available=True)
+    res = intent.classify("help me with my supply chain", reg, prov)
+    assert res.job_type == "pricing"
+    assert res.confidence == pytest.approx(0.6)
+
+
+def test_leadership_tool_scores_via_llm_provider():
+    # the leadership LLM-extraction branch in tools.py, exercised deterministically
+    t = tools.leadership_tool()
+    prov = _FakeProvider(
+        extract_obj={"C": 3, "H": 2, "A": 3, "I": 1, "N": 1, "evidence": {"C": "convoca a otras áreas"}},
+        available=True,
+    )
+    prep = t.prepare(JobRequest(brief="great ops, never presents to the board"), prov)
+    assert prep.status == "ok"
+    assert prep.payload.scores == {"C": 3, "H": 2, "A": 3, "I": 1, "N": 1}
+    assert prep.payload.evidence["C"] == "convoca a otras áreas"
