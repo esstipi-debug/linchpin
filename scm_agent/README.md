@@ -1,4 +1,4 @@
-# scm_agent — the orchestrator
+# scm_agent — Linchpin's orchestrator
 
 One entry point that turns a free-form brief (+ optional data) into a finished
 deliverable, routing to the right capability.

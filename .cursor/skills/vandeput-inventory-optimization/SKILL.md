@@ -2,7 +2,7 @@
 name: vandeput-inventory-optimization
 description: >-
   Implements inventory models from Nicolas Vandeput (2020) Inventory Optimization
-  Models and Simulations using the supply-chain-optimization Python repo. Covers
+  Models and Simulations using the linchpin Python repo. Covers
   EOQ, safety stock, (s,Q)/(R,S) policies, simulation, fill rate, cost optimization,
   gamma demand, multi-echelon GSM, newsvendor, KDE/discrete PMF, and simulation
   optimization. Use when working on this repo, Vandeput book examples, safety stock,
@@ -13,7 +13,7 @@ description: >-
 
 **Source of truth:** Vandeput, N. (2020). *Inventory Optimization: Models and Simulations*. De Gruyter.
 
-**Repo:** `supply-chain-optimization` — Python 3.10+, numpy/pandas/scipy/pytest.
+**Repo:** `linchpin` — Python 3.10+, numpy/pandas/scipy/pytest.
 
 ## Quick workflow
 

@@ -4,7 +4,7 @@ description: >-
   EOQ, safety stock, (s,Q) and (R,S) policies, and discrete simulation with
   backorders from Vandeput (2020) Chapters 2-5. Use when calculating economic
   order quantity, reorder points, order-up-to levels, or validating policies
-  via simulation in the supply-chain-optimization repo.
+  via simulation in the linchpin repo.
 ---
 
 # Vandeput Part I–II: EOQ & Policies

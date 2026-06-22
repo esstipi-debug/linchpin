@@ -1,4 +1,4 @@
-# UI Design Brief — Supply Chain Optimization
+# UI Design Brief — Linchpin
 
 > Instructions for building the front-end ("the cabin") on top of the engine,
 > using Claude (claude.ai artifacts or Claude Code). This brief is written to be

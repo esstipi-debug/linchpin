@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "supply-chain-optimization"
+name = "linchpin"
 version = "2.8.0"
-description = "Python implementation of Vandeput (2020) inventory optimization models: EOQ, safety stock, (s,Q)/(R,S) policies, simulation."
+description = "Linchpin — an agentic supply-chain engine: inventory optimization, pricing and leadership analysis from a plain-language brief, grounded in a 17-book SCM knowledge graph."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11"
@@ -35,7 +35,7 @@ web = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/esstipi-debug/supply-chain-optimization"
+Homepage = "https://github.com/esstipi-debug/linchpin"
 
 [tool.setuptools]
 packages = ["src"]

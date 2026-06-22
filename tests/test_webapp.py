@@ -239,7 +239,7 @@ def test_prune_old_jobs_removes_stale_dirs():
 def test_console_route_serves_the_prototype():
     r = client.get("/console")
     assert r.status_code == 200
-    assert "SCM Agent" in r.text  # the live console brand
+    assert "Linchpin" in r.text  # the live console brand
 
 
 @requires_multipart

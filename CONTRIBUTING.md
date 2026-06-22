@@ -1,12 +1,12 @@
 # Contributing
 
-Thank you for improving this implementation of **Vandeput (2020)** inventory models.
+Thank you for improving **Linchpin** — an agentic supply-chain engine grounded in the SCM literature.
 
 ## Setup
 
 ```bash
-git clone https://github.com/esstipi-debug/supply-chain-optimization.git
-cd supply-chain-optimization
+git clone https://github.com/esstipi-debug/linchpin.git
+cd linchpin
 python -m venv venv
 # Windows: venv\Scripts\activate
 pip install -r requirements.txt
@@ -17,8 +17,8 @@ pytest
 
 | Area | Examples |
 |------|----------|
-| Models | New book sections, bug fixes in formulas |
-| Tests | Numeric examples from the book (§ references) |
+| Models | New model sections, bug fixes in formulas |
+| Tests | Numeric examples from the source texts (§ references) |
 | Examples | New workflows, plots |
 | Docs | FAQ, METHODOLOGY, case studies |
 | Export | Excel/Power BI dataset improvements |
@@ -35,7 +35,7 @@ pytest
 
 - [ ] Tests pass (`pytest`)
 - [ ] No fake marketing claims in docs
-- [ ] Book section referenced in docstrings where relevant
+- [ ] Source section referenced in docstrings where relevant
 - [ ] CHANGELOG updated if behavior changed
 
 ## Code style

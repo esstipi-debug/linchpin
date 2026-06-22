@@ -43,7 +43,7 @@ A leadership skill was handed off and approved as the **3rd tool + install**:
 
 ## Repo facts / how to run (Windows)
 - Repo: `C:\Users\Gamer\Music\scm\supply-chain-optimization` (open THIS folder, not `scm\`).
-  Remote: `github.com/esstipi-debug/supply-chain-optimization`.
+  Remote: `github.com/esstipi-debug/linchpin`.
 - The Python with deps is the **`py` launcher** (Python 3.13 + pandas/scipy/fastapi/etc.).
   The `uv` graphify interpreter does NOT have the deps.
 - Tests: `py -m pytest -q --cov=src --cov-fail-under=80` · Lint: `py -m ruff check src jobs tests examples scripts webapp`

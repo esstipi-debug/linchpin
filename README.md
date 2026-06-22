@@ -1,20 +1,20 @@
 <div align="center">
 
-# 🔗 Supply Chain Optimization
+# 🔗 Linchpin
 
-### From textbook inventory models to an agentic supply-chain brain.
+### The agentic brain for supply-chain decisions — grounded in the field's best models and sources.
 
-A Python **engine** implementing Nicolas Vandeput's *Inventory Optimization: Models and Simulations* (2020) — EOQ, safety stock, `(s,Q)`/`(R,S)` policies, multi-echelon, simulation, forecasting and pricing — wrapped in an **orchestrator agent** that turns a plain-language brief into finished, QA-gated deliverables, each **grounded** in a knowledge graph of 17 SCM books and the codebase itself.
+**Linchpin** turns a plain-language brief into finished, QA-gated supply-chain deliverables. A Python **engine** implements the field's established inventory-optimization models — EOQ, safety stock, `(s,Q)`/`(R,S)` policies, multi-echelon, simulation, forecasting and pricing — and an **orchestrator agent** drives them end to end, each result **grounded** in a knowledge graph of **17 SCM books and the codebase itself**.
 
 [![version](https://img.shields.io/badge/version-2.8.0-5eead4)](CHANGELOG.md)
 [![python](https://img.shields.io/badge/python-3.11--3.13-3776AB?logo=python&logoColor=white)](pyproject.toml)
-[![tests](https://github.com/esstipi-debug/supply-chain-optimization/actions/workflows/tests.yml/badge.svg)](https://github.com/esstipi-debug/supply-chain-optimization/actions/workflows/tests.yml)
+[![tests](https://github.com/esstipi-debug/linchpin/actions/workflows/tests.yml/badge.svg)](https://github.com/esstipi-debug/linchpin/actions/workflows/tests.yml)
 [![coverage](https://img.shields.io/badge/coverage-91%25-3fb950)](#)
 [![License: MIT](https://img.shields.io/badge/License-MIT-3fb950.svg)](LICENSE)
 
 </div>
 
-![SCM Agent console — a brief routed to the leadership_chain capability, returning a CHAIN profile with downloadable chart and report](docs/assets/scm-agent-console.png)
+![Linchpin console — a brief routed to the leadership_chain capability, returning a CHAIN profile with downloadable chart and report](docs/assets/scm-agent-console.png)
 
 <div align="center"><sub>The live agent console (<code>webapp/static/prototype/</code>) talking to the real <code>POST /api/jobs</code>.</sub></div>
 
@@ -33,7 +33,7 @@ flowchart LR
   I --> Q{"QA gate"}
   P --> Q
   L --> Q
-  Q -->|pass| G["Ground in L3 — book + code citations"]
+  Q -->|pass| G["Ground in L3 — source + code citations"]
   G --> D["Deliverables — Excel · report · chart + Fuentes"]
   Q -->|fail| N["no deliverable"]
 ```
@@ -51,8 +51,8 @@ Runs **with or without an LLM**: an optional `LLMProvider` (Claude) sharpens rou
 ## 🚀 Quick start
 
 ```bash
-git clone https://github.com/esstipi-debug/supply-chain-optimization
-cd supply-chain-optimization
+git clone https://github.com/esstipi-debug/linchpin
+cd linchpin
 pip install -r requirements.txt
 
 # ── The agent: brief in, deliverable out ───────────────────────────────
@@ -70,7 +70,7 @@ python -m uvicorn webapp.app:app --reload
 > Set `ANTHROPIC_API_KEY` (and `pip install -e ".[llm]"`) to enable Claude-assisted parsing and narrative — optional.
 
 <details>
-<summary><b>📐 Engine CLIs — the book, chapter by chapter</b></summary>
+<summary><b>📐 Engine CLIs — the models, hands-on</b></summary>
 
 ```bash
 # EOQ + policies + simulation on sample data
@@ -205,7 +205,7 @@ Sliders **recompute the policy live**; the **agent console** (`/console`) adds t
 <details>
 <summary><b>📖 Chapter map (Vandeput 2020) — module by module</b></summary>
 
-> **Source of truth:** Vandeput (2020). Official book code: [supchains.com/resources-invopt](https://supchains.com/resources-invopt) (password: `SupChains-IO`).
+> **Primary reference for the inventory engine:** Vandeput (2020) — the modules below map to its chapters. Deliverables are grounded across all **17 books** in the knowledge graph, not a single source. Official companion code: [supchains.com/resources-invopt](https://supchains.com/resources-invopt) (password: `SupChains-IO`).
 
 | Book section | Module | Status |
 |--------------|--------|--------|
