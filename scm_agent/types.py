@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.guided import GuidedOutcome
 
 STATUS_OK = "ok"
 STATUS_NEEDS_CLARIFICATION = "needs_clarification"
@@ -34,3 +38,4 @@ class JobResult:
     qa_issues: list[str] = field(default_factory=list)
     clarifications: list[str] = field(default_factory=list)
     citations: list[str] = field(default_factory=list)  # L3 domain grounding (book/chapter)
+    guided: GuidedOutcome | None = None  # never-unprotected contract (Guided Execution Layer)

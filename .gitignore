@@ -37,6 +37,9 @@ graphify-out/
 # generated client deliverables
 deliverables/
 
+# large external datasets (Kaggle / M5 etc. — fetched locally, not versioned)
+data/kaggle/
+
 # Misc
 .claude/
 .secrets/
@@ -45,3 +48,4 @@ output/
 
 # orchestrator job outputs
 webapp/_jobs_output/
+.gstack/

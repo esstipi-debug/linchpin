@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from pathlib import Path
 
+from .guided_bridge import to_guided_outcome
 from .intent import classify
 from .knowledge import KnowledgeBase
 from .llm import LLMProvider, get_provider
@@ -50,11 +52,13 @@ class Orchestrator:
         request = JobRequest(brief=brief, data_path=data_path, job_type=job_type,
                              params=dict(overrides), client=client)
         try:
-            return self._run(request, Path(out_dir))
+            result = self._run(request, Path(out_dir))
         except Exception:  # never crash the caller — surface as error status
             logger.error("orchestrator.run failed", exc_info=True)
-            return JobResult(status=STATUS_ERROR, tool=None, confidence=0.0,
-                             deliverables={}, summary="An internal error occurred.")
+            result = JobResult(status=STATUS_ERROR, tool=None, confidence=0.0,
+                               deliverables={}, summary="An internal error occurred.")
+        # Single boundary: every result leaves with a protected, executable path.
+        return replace(result, guided=to_guided_outcome(result))
 
     def _run(self, request: JobRequest, out_dir: Path) -> JobResult:
         intent = classify(request.brief, self.registry, self.provider, job_type_override=request.job_type)
