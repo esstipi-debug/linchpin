@@ -4,7 +4,7 @@
 
 ### From textbook inventory models to an agentic supply-chain brain.
 
-A Python **engine** implementing Nicolas Vandeput's *Inventory Optimization: Models and Simulations* (2020) — EOQ, safety stock, `(s,Q)`/`(R,S)` policies, multi-echelon, simulation, forecasting and pricing — wrapped in an **orchestrator agent** that turns a plain-language brief into finished, QA-gated deliverables.
+A Python **engine** implementing Nicolas Vandeput's *Inventory Optimization: Models and Simulations* (2020) — EOQ, safety stock, `(s,Q)`/`(R,S)` policies, multi-echelon, simulation, forecasting and pricing — wrapped in an **orchestrator agent** that turns a plain-language brief into finished, QA-gated deliverables, each **grounded** in a knowledge graph of 17 SCM books and the codebase itself.
 
 [![version](https://img.shields.io/badge/version-2.8.0-5eead4)](CHANGELOG.md)
 [![python](https://img.shields.io/badge/python-3.11--3.13-3776AB?logo=python&logoColor=white)](pyproject.toml)
@@ -33,7 +33,8 @@ flowchart LR
   I --> Q{"QA gate"}
   P --> Q
   L --> Q
-  Q -->|pass| D["Deliverables — Excel · report · chart"]
+  Q -->|pass| G["Ground in L3 — book + code citations"]
+  G --> D["Deliverables — Excel · report · chart + Fuentes"]
   Q -->|fail| N["no deliverable"]
 ```
 
@@ -43,7 +44,7 @@ flowchart LR
 | 💲 `pricing` | price/qty CSV/Excel | Excel + report — elasticity → margin-maximizing price |
 | 🧭 `leadership_chain` | a brief / scores | radar chart + report — CHAIN leadership profile + directives |
 
-Runs **with or without an LLM**: an optional `LLMProvider` (Claude) sharpens routing and the narrative; the deterministic core works on its own. The whole thing is **187 tests, ~91 % coverage**.
+Runs **with or without an LLM**: an optional `LLMProvider` (Claude) sharpens routing and the narrative; the deterministic core works on its own. The whole thing is **211 tests, ~91 % coverage**.
 
 ---
 
@@ -119,11 +120,30 @@ brief ─▶ intent.classify ─▶ registry.get(tool) ─▶ prepare ─▶ run
               (rules + optional LLM)                inventory · pricing · leadership_chain
 ```
 
-- **`scm_agent/`** — `types` · `llm` (Claude / rules fallback) · `registry` · `tools` · `intent` · `orchestrator`
+- **`scm_agent/`** — `types` · `llm` (Claude / rules fallback) · `registry` · `tools` · `intent` · `orchestrator` · `knowledge` (L3 grounding)
 - **Entry points** — CLI `examples/run_agent.py`, HTTP `POST /api/jobs` (multipart, with downloadable deliverables), and the live console under `webapp/static/prototype/`
 - **Statuses** — `ok` · `needs_clarification` · `needs_data` · `qa_failed` · `error`
 
 Full reference: [`scm_agent/README.md`](scm_agent/README.md). The `leadership_chain` capability wraps the **CHAIN** model — *síntesis original inspirada en* From Source to Sold *(Palamariu & Alicke, 2022); no reproduce el texto del libro.*
+
+---
+
+## 🧠 L3 — domain knowledge & the theory↔code bridge
+
+Every job is **grounded**: the orchestrator queries a knowledge graph and attaches citations to each result (the **Fuentes** shown in the console). Two graphs, one read-only query surface — [`scm_agent/knowledge.py`](scm_agent/knowledge.py):
+
+- **Books graph** ([`knowledge/scm-books/`](knowledge/scm-books/README.md)) — **17 SCM books** (forecasting, pricing, revenue management, inventory — incl. **Vandeput**): 430 concept nodes with chapter citations. Committed.
+- **Code graph** (`graphify-out/`) — the codebase itself, built with `/graphify`. Gitignored (regenerable).
+
+The **bridge** ties them together: for each cited concept it resolves the `src/` module that implements it, so a deliverable cites the chapter **and** the function behind it.
+
+```text
+Economic Order Quantity           — Vandeput Ch.2  ->  src/eoq.py
+Safety Stock                      — Vandeput Ch.4  ->  src/safety_stock.py
+Cost & Service-Level Optimization — Vandeput Ch.8  ->  src/cost_optimization.py
+```
+
+Query it directly: `python examples/query_knowledge.py --bridge "newsvendor"` · `--search "fill rate"` · `--explain crostons_method`.
 
 ---
 
@@ -216,7 +236,7 @@ jobs/                 Playbooks (inventory · pricing · leadership) + intake/QA
 src/                  Core engine (EOQ → simulation optimization → forecasting → pricing)
 webapp/               FastAPI dashboard + POST /api/jobs + live agent console (static/prototype/)
 examples/             CLI workflows (run_agent, parts 1-4, batch, jobs, plots)
-tests/                187 tests with book numeric examples
+tests/                211 tests with book numeric examples
 data/                 Sample demand + pricing
 documentation/        Guides, FAQ, methodology
 power-bi/             CSV dataset + M queries + DAX + SETUP.md
