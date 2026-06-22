@@ -89,6 +89,29 @@ def test_bridge_links_theory_to_implementation(kb: KnowledgeBase) -> None:
     assert any(c.source for c in b.implementation)
 
 
+@pytest.mark.skipif(not CODE.exists(), reason="code graph is gitignored")
+def test_implements_bridges_a_concept_to_source_code(kb: KnowledgeBase) -> None:
+    hits = kb.search("economic order quantity", graph="books")
+    assert hits, "expected an EOQ concept in the books graph"
+    impl = kb.implements(hits[0])
+    assert impl is not None
+    assert impl.graph == "code"
+    assert impl.source and impl.source.endswith(".py")
+
+
+def test_implements_returns_none_when_code_graph_absent(tmp_path: Path) -> None:
+    kb = KnowledgeBase(books_path=BOOKS, code_path=tmp_path / "none.json")
+    concept = Concept(id="economic_order_quantity", label="Economic Order Quantity",
+                      source=None, location=None, graph="books")
+    assert kb.implements(concept) is None
+
+
+def test_implements_ignores_a_lone_common_token(kb: KnowledgeBase) -> None:
+    # A concept sharing only one ubiquitous domain word must not forge a code link.
+    concept = Concept(id="thing", label="price", source=None, location=None, graph="books")
+    assert kb.implements(concept) is None
+
+
 def test_missing_graph_paths_degrade_gracefully(tmp_path: Path) -> None:
     kb = KnowledgeBase(books_path=tmp_path / "nope.json", code_path=tmp_path / "nope2.json")
     assert kb.available() == {"books": 0, "code": 0}

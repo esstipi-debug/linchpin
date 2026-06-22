@@ -144,6 +144,38 @@ class KnowledgeBase:
         impl = tuple(self.search(term, graph="code", limit=5))
         return Bridge(term=term, theory=theory, implementation=impl)
 
+    def implements(self, concept: Concept, min_overlap: int = 2) -> Concept | None:
+        """Best code node that implements a books concept (theory -> code), or None.
+
+        The precise half of bridge() for grounding: requires at least `min_overlap`
+        shared tokens between the concept and a `.py` code node, so a single common
+        word (e.g. "price") can't forge a spurious link. Prefers real src/ modules.
+        Returns None when the code graph is absent or nothing clears the bar — the
+        caller then cites theory only.
+        """
+        want = _tokens(f"{concept.label} {concept.id}")
+        if not want:
+            return None
+        best: tuple[int, int, Concept] | None = None
+        for n in self._graphs["code"]["nodes"]:
+            src = n.get("source_file") or ""
+            if not src.endswith(".py"):
+                continue
+            stem = Path(src).stem
+            have = _tokens(f"{n.get('label', '')} {n.get('id', '')} {n.get('norm_label', '')} {stem}")
+            score = len(want & have)
+            # A 2-token hit is only trustworthy when the file is named after the
+            # concept (eoq.py for "Economic Order Quantity"); otherwise a pair of
+            # common domain words ("dynamic", "pricing") forges a link, so require
+            # 3+. Keeps the strong bridges, drops the coincidental ones.
+            named_after = bool(_tokens(stem) & want)
+            if score < (min_overlap if named_after else min_overlap + 1):
+                continue
+            rank = (score, 1 if src.startswith("src/") else 0, self._to_concept(n, "code"))
+            if best is None or rank[:2] > best[:2]:
+                best = rank
+        return best[2] if best else None
+
     # -- internals ------------------------------------------------------
 
     def _to_concept(self, node: dict, graph: str) -> Concept:

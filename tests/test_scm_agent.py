@@ -113,6 +113,7 @@ def test_registry_match_scores_by_keyword_hits():
 
 PORTFOLIO = "data/sample_demand_portfolio.csv"
 PRICING_CSV = "data/sample_pricing.csv"
+_CODE_GRAPH = Path(__file__).resolve().parent.parent / "graphify-out" / "graph.json"
 
 
 def test_build_default_registry_has_three_tools():
@@ -362,6 +363,19 @@ def test_orchestrator_narrative_weaves_citations_when_llm_present(tmp_path):
     assert res.status == "ok"
     assert res.summary == "Grounded narrative."
     assert res.citations  # citations still attached alongside the LLM summary
+
+
+@pytest.mark.skipif(not _CODE_GRAPH.exists(), reason="code graph is gitignored / not built")
+def test_orchestrator_bridges_a_citation_to_source_code(tmp_path):
+    # With the code graph present, L3 grounding bridges at least one cited concept
+    # to the src/ module that implements it (theory -> code), e.g. EOQ -> src/eoq.py.
+    res = _rules_orch().run("set up reorder points and safety stock", data_path=PORTFOLIO,
+                            client="Acme", out_dir=tmp_path)
+    assert res.status == "ok"
+    bridged = [c for c in res.citations if "  -> " in c]
+    assert bridged, res.citations
+    assert all(" — " in c for c in bridged)  # the theory half is preserved
+    assert any("src/" in c and ".py" in c for c in bridged)  # code half points at a module
 
 
 # ---------------------------------------------------------------------------
