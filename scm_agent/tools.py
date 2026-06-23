@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from jobs import (
+    abc_xyz_job,
     cost_to_serve_deliverable,
     cost_to_serve_job,
     deliverables,
@@ -290,6 +291,53 @@ def sop_tool() -> Tool:
     )
 
 
+# ---- abc_xyz (ABC-XYZ classification) ----------------------------------------
+
+def _abc_xyz_prepare(request: JobRequest, provider: LLMProvider) -> Prepared:
+    if not request.data_path:
+        return Prepared(status="needs_data", messages=["a per-SKU demand CSV (product, demand, unit cost) is required"])
+    try:
+        items = abc_xyz_job.prepare(request.data_path, request.params)
+    except (ValueError, FileNotFoundError) as exc:
+        return Prepared(status="needs_data", messages=[str(exc)])
+    if not items:
+        return Prepared(status="needs_data", messages=["no SKUs found in the data"])
+    return Prepared(status="ok", payload=items)
+
+
+def _abc_xyz_run(payload: object, params: dict) -> Produced:
+    report = abc_xyz_job.run(
+        payload,
+        abc_thresholds=tuple(params.get("abc_thresholds", (0.80, 0.95))),
+        cv_cuts=tuple(params.get("cv_cuts", (0.5, 1.0))),
+    )
+    return Produced(report=report, summary=(
+        f"Classified {report.n_skus} SKUs; {report.n_a} A-items hold "
+        f"{report.a_value_share * 100:.0f}% of value, {report.n_cz} discontinuation candidates."
+    ))
+
+
+def abc_xyz_tool() -> Tool:
+    return Tool(
+        key="abc_xyz",
+        title="ABC-XYZ Classification",
+        description="Classify SKUs by value (ABC / Pareto) and demand variability (XYZ) into the "
+                    "9-cell matrix, assigning a review policy and service level per cell.",
+        intent_keywords=(
+            "abc-xyz", "abc xyz", "abc analysis", "abc classification", "abc class",
+            "xyz analysis", "pareto", "sku classification", "classify", "classification",
+        ),
+        requires_data=True,
+        prepare=_abc_xyz_prepare,
+        run=_abc_xyz_run,
+        qa=lambda report: abc_xyz_job.verify(report),
+        deliver=lambda report, out_dir, client: abc_xyz_job.write_operational(report, out_dir, client),
+        deck=lambda report, out_dir, client, citations, confidence: abc_xyz_job.build_deck(
+            report, client=client, citations=tuple(citations), confidence=confidence,
+        ).write_all(out_dir),
+    )
+
+
 def build_default_registry() -> ToolRegistry:
     reg = ToolRegistry()
     reg.register(inventory_tool())
@@ -297,4 +345,5 @@ def build_default_registry() -> ToolRegistry:
     reg.register(leadership_tool())
     reg.register(cost_to_serve_tool())
     reg.register(sop_tool())
+    reg.register(abc_xyz_tool())
     return reg
