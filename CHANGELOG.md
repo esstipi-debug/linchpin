@@ -19,7 +19,8 @@
 - **Data-quality core (`src/data_quality.py`)** — GTIN/UPC/EAN check-digit validation, SKU normalization, canonical column mapping (capability M11).
 - **SKU deduplication (`src/sku_dedup.py`)** — duplicate detection by shared GTIN + fuzzy name match (rapidfuzz when installed, `difflib` fallback) (capability M11).
 - Optional dependency extras: `dataquality` (rapidfuzz, python-stdnum), `mcdm` (pymcdm), `forecast` (statsforecast, utilsforecast) — modules degrade gracefully when absent.
-- Capability Expansion Plan progress: **Fase 0** (foundations) + **Fase 1** + pure cores of **Fases 3-4** (M6/M7/M8/M11/M2-metrics) + first dep-gated module with fallback. See `documentation/CAPABILITY_EXPANSION_PLAN.md`. ~135 new tests; full suite 350 passing, ruff clean.
+- **Voice agent brain (`src/voice/`)** — the credential-free core of capability M16: 7 call playbooks (`playbooks.py`), the outbound-call compliance gate (`compliance.py` — DNC/consent/calling-window/attempt-cap + TCPA/EU-AI-Act AI-disclosure), the 12 logistics document field maps (`doc_schemas.py`), the six-block ElevenLabs system-prompt + agent-config builder (`agent_config.py`), and the curated RAG knowledge base (`knowledge_base/logistics_kb.md`). Only live dialling (ElevenLabs/Twilio) needs credentials.
+- Capability Expansion Plan progress: **Fase 0** (foundations) + **Fase 1** + pure cores of **Fases 3-4** (M6/M7/M8/M11/M2-metrics) + first dep-gated module with fallback + **Fase 5 voice-agent brain** (M16, credential-free). See `documentation/CAPABILITY_EXPANSION_PLAN.md`. ~159 new tests; full suite 374 passing, ruff clean.
 
 ### Changed
 - **Renamed the project to Linchpin** — repo, distribution package, agent console, and docs. The GitHub repository moved to `esstipi-debug/linchpin` (the old `supply-chain-optimization` URL redirects automatically). The importable module `scm_agent` and the engine package `src` are unchanged.
