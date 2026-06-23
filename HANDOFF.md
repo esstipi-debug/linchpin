@@ -25,13 +25,13 @@ Positioned to win Upwork inventory + SCM gigs (human sells, Linchpin produces 10
 
 ## 2. Current state (verified)
 
-- **Tests:** 566 passing, ~95% coverage (`.venv/Scripts/python.exe -m pytest`).
+- **Tests:** 583 passing, ~95% coverage (`.venv/Scripts/python.exe -m pytest`).
 - **L3 graph** (`knowledge/scm-books/graph.json`): **1824 nodes / 3640 edges / 122 communities, 23 sources** (forecasting, pricing/revenue, SCM, inventory, manufacturing planning, operations mgmt, logistics, sustainability, leadership). Queried via `scm_agent/knowledge.py` (`search`/`explain`), cited by chapter.
 - **Operating modes** (`scm_agent/modes.py`): `INVENTORY` (stock subset) vs `SCM` (superset, all tools) — each with persona + deliverable/KPI catalogue. `get_mode()`, `build_registry(mode)`, `orchestrator_for(mode)`.
 - **Deliverable generator** (`src/deliverable.py` + `jobs/inventory_deliverable.py`): engine output → Markdown + XLSX with exec summary, quantified findings, KPI table w/ rationale, data-source map, L3 citations, coverage/handoff block.
 - **S&OP/IBP cadence** (`src/sop.py` + `jobs/sop_deliverable.py`, gap #2, shipped PR #21): monthly demand→supply→reconciliation→exec workflow. Chase/level/hybrid aggregate-planning strategies → inventory-balance projection → cost/service/working-capital evaluation → `run_sop_cycle` emits a protected ranked OPTIONS outcome → the "S&OP/IBP deck" SCM mode advertises. Demo: `examples/run_sop_cycle.py`. Library + deliverable only — **not yet an agent tool**.
 - **Cost-to-serve + working capital** (`src/cost_to_serve.py` + `src/working_capital.py` + `jobs/cost_to_serve_deliverable.py`, gap #3, shipped PR #22): activity-based CTS (product/fulfillment/returns/overhead → net-to-serve margin + whale curve) and the cash-to-cash / cash-release lens. Works **without** a precomputed profit column. Composes `landed_cost` + `financial_kpis.cash_to_cash`. Demo: `examples/run_cost_to_serve.py`. Library + deliverable only — **not yet an agent tool**.
-- **Agent surface caveat:** the orchestrator wires only **3 tools** (`inventory_optimization`, `pricing`, `leadership_chain`); the other ~17 SCM modules are tested library cores + CLI/skills, not yet agent tools. (See [[linchpin-verified-audit]].) The agent now **narrates in each mode's persona** and **emits the premium "artifacts that sell" deck** (KPI rationale + L3 citations + coverage/handoff) via the optional `Tool.deck` hook — wired for `inventory_optimization` (PR #23). Pattern is ready to copy to new tools.
+- **Agent surface:** the orchestrator now wires **5 tools** — `inventory_optimization`, `pricing`, `leadership_chain`, **`cost_to_serve`** (PR #24), **`sop`** (PR #25). The original "only 3 tools" audit caveat is **closed**; both new SCM (non-inventory) deliverables are reachable end-to-end. The remaining ~15 `src/` modules are tested library cores + CLI/skills, not yet agent tools. The agent also **narrates in each mode's persona** and **emits the premium "artifacts that sell" deck** (KPI rationale + L3 citations + coverage/handoff) via the optional `Tool.deck` hook (PR #23), wired for `inventory_optimization` / `cost_to_serve` / `sop`. New-tool recipe: a `jobs/<x>_job.py` with a `prepare()` that reads its own CSV (pandas, **not** `intake.py`), `run`/`verify`, then a `Tool` in `tools.py` with distinctive multi-word `intent_keywords`.
 
 ---
 
@@ -55,6 +55,8 @@ Positioned to win Upwork inventory + SCM gigs (human sells, Linchpin produces 10
 | `32ead63` (PR #21) | **Gap #2 — S&OP/IBP cadence engine + deck.** `src/sop.py`, `jobs/sop_deliverable.py`, `examples/run_sop_cycle.py`, 28 tests. Also cleared pre-existing ruff debt (`src/deliverable.py` unused `field`, `examples/run_scm_olist.py` dead vars) that CI surfaced. Tests green on py3.11/3.12/3.13. |
 | `ee156ea` (PR #22) | **Gap #3 — cost-to-serve + working-capital module.** `src/cost_to_serve.py`, `src/working_capital.py`, `jobs/cost_to_serve_deliverable.py`, `examples/run_cost_to_serve.py`, 24 tests. Purely additive. Green on py3.11/3.12/3.13. |
 | `c6a702e` (PR #23) | **Item 4 — orchestrator wire-ups (unblocked half).** Mode persona threaded into `_narrative`; optional `Tool.deck` hook emits the premium deck alongside operational files (wired for `inventory_optimization`). `scm_agent/{orchestrator,modes,registry,tools}.py` + 8 tests. Backward-compatible. |
+| `0f7180f` (PR #24) | **Item 3 — cost-to-serve as the 4th agent tool.** `jobs/cost_to_serve_job.py` (order-line CSV -> segment activity, pandas only, no `intake`) + `cost_to_serve_tool`. 10 tests incl. routing + end-to-end. |
+| `a837b30` (PR #25) | **Item 3 — S&OP as the 5th agent tool.** `jobs/sop_job.py` (demand history -> monthly horizon) + `sop_tool`. 7 tests. **3-tools audit caveat closed.** |
 
 ---
 
@@ -76,12 +78,12 @@ Positioned to win Upwork inventory + SCM gigs (human sells, Linchpin produces 10
 
 1. ~~**Gap #2 — S&OP/IBP cadence orchestration**~~ ✅ **DONE** (PR #21, `32ead63`). `src/sop.py` + `jobs/sop_deliverable.py` + `examples/run_sop_cycle.py`.
 2. ~~**Gap #3 — Cost-to-serve + working-capital/cash-release module**~~ ✅ **DONE** (PR #22, `ee156ea`). `src/cost_to_serve.py` + `src/working_capital.py` + `jobs/cost_to_serve_deliverable.py` + `examples/run_cost_to_serve.py`.
-3. **Wire-ups: register `run_sop_cycle` + cost-to-serve as orchestrator tools** (deferred from PR #21/#22 to avoid coupling `prepare()` to the parallel loop's actively-changing `jobs/intake.py`). Do this once `intake.py` settles — gives the agent its first end-to-end SCM (non-inventory) deliverables and starts closing the 3-tools gap. Tool contract: `scm_agent/tools.py` (prepare/run/qa/deliver); qa via `guided.verify_guided(...)`; deliver via the new `jobs/*_deliverable.build(...).write_all(...)`.
+3. ~~**Wire-ups: register `run_sop_cycle` + cost-to-serve as orchestrator tools**~~ ✅ **DONE** (PRs #24, #25). Decoupled from `intake.py` by giving each tool its own pandas `prepare()`. The 3-tools audit caveat is closed (5 tools now). Next tools to register, same recipe: `ddmrp`, `supplier_scorecard`/`mcdm` (sourcing), `landed_cost`, `classification` (ABC-XYZ).
 4. ~~**Other wire-ups** (persona into `_narrative`; deliverable generator in the `deliver` path)~~ ✅ **DONE** (PR #23, `c6a702e`). `Tool.deck` hook + per-mode persona.
 5. **Gap #5 — Live connectors** (Shopify → Amazon SP-API → ERP): the execution unlock; **blocked** — needs the client's API keys per engagement.
 6. **Finish Ivanov L3 coverage** (~70 nodes, partial): **blocked** — Kimi daily-token limit. Re-run when budget resets or via host-subagent extraction.
 
-> **Status for the next session:** the two CFO/exec deliverables (S&OP deck, cost-to-serve deck) exist as libraries; the agent now narrates in persona and emits the premium inventory deck. **Every remaining roadmap item is currently blocked**: the tool-registration wire-up (item 3) on the parallel loop's `intake.py`; connectors (5) on client API keys; Ivanov L3 (6) on Kimi tokens. When `intake.py` settles, item 3 is the highest-leverage unblock — copy the `inventory_optimization` Tool pattern (now incl. the `deck` hook) to register `run_sop_cycle` and cost-to-serve, with `prepare()` doing its own periodization to stay decoupled.
+> **Status for the next session:** all clean/unblocked roadmap work is **shipped** — Gaps #2 & #3 (libraries + decks), the orchestrator wire-ups (persona + `Tool.deck`), and the agent-tool registration for both (5 tools, 3-tools caveat closed). The remaining headline items are **externally blocked**: Gap #5 connectors (5) need client API keys; Ivanov L3 (6) needs Kimi token budget. The clear next *internal* work is **registering more `src/` modules as agent tools** (item 3 recipe — ddmrp, sourcing/MCDM, landed cost, ABC-XYZ), each with its own decoupled `prepare()`. None of those touch the parallel loop's files.
 
 ---
 
@@ -101,6 +103,7 @@ Positioned to win Upwork inventory + SCM gigs (human sells, Linchpin produces 10
 - Deliverable: `src/deliverable.py`, `jobs/inventory_deliverable.py`, `jobs/sop_deliverable.py`, `jobs/cost_to_serve_deliverable.py`
 - S&OP/IBP cadence: `src/sop.py` (engine + `run_sop_cycle`), `examples/run_sop_cycle.py`
 - Cost-to-serve / working capital: `src/cost_to_serve.py`, `src/working_capital.py`, `examples/run_cost_to_serve.py`
+- Agent-tool data-prep (decoupled, pandas-only): `jobs/cost_to_serve_job.py`, `jobs/sop_job.py`; tools wired in `scm_agent/tools.py`
 - Engines: `src/*.py` (eoq, safety_stock, policies, forecasting, classification, ddmrp, financial_kpis, supplier_scorecard, mcdm, landed_cost, reconciliation, simulation_opt, guided, writeback, voice/*)
 - Knowledge: `knowledge/scm-books/` (L3 books graph), `graphify-out/` (code graph, gitignored)
 - Tests: `tests/test_*.py` (506) · Examples: `examples/run_*.py` · Plan: `documentation/CAPABILITY_EXPANSION_PLAN.md`
