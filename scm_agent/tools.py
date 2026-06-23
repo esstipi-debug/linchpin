@@ -6,6 +6,7 @@ from jobs import (
     abc_xyz_job,
     cost_to_serve_deliverable,
     cost_to_serve_job,
+    ddmrp_job,
     deliverables,
     intake,
     inventory_deliverable,
@@ -382,6 +383,49 @@ def sourcing_tool() -> Tool:
     )
 
 
+# ---- ddmrp (Demand-Driven MRP buffers) ---------------------------------------
+
+def _ddmrp_prepare(request: JobRequest, provider: LLMProvider) -> Prepared:
+    if not request.data_path:
+        return Prepared(status="needs_data", messages=["a parts CSV (part, ADU, decoupled lead time, on-hand/on-order/demand) is required"])
+    try:
+        records = ddmrp_job.prepare(request.data_path, request.params)
+    except (ValueError, FileNotFoundError) as exc:
+        return Prepared(status="needs_data", messages=[str(exc)])
+    if not records:
+        return Prepared(status="needs_data", messages=["no parts found in the data"])
+    return Prepared(status="ok", payload=records)
+
+
+def _ddmrp_run(payload: object, params: dict) -> Produced:
+    report = ddmrp_job.run(payload)
+    return Produced(report=report, summary=(
+        f"Sized DDMRP buffers for {report.n_parts} parts; {report.n_red} in the red, "
+        f"{report.n_order} need an order ({report.total_order_qty:,.0f} units)."
+    ))
+
+
+def ddmrp_tool() -> Tool:
+    return Tool(
+        key="ddmrp",
+        title="DDMRP Buffer Plan",
+        description="Size demand-driven (red/yellow/green) buffers and compute the net-flow "
+                    "planning signal per part: what to order now, ranked by execution priority.",
+        intent_keywords=(
+            "ddmrp", "demand driven mrp", "demand-driven", "buffer zones", "buffer sizing",
+            "buffer profile", "net flow", "decoupling point", "red yellow green",
+        ),
+        requires_data=True,
+        prepare=_ddmrp_prepare,
+        run=_ddmrp_run,
+        qa=lambda report: ddmrp_job.verify(report),
+        deliver=lambda report, out_dir, client: ddmrp_job.write_operational(report, out_dir, client),
+        deck=lambda report, out_dir, client, citations, confidence: ddmrp_job.build_deck(
+            report, client=client, citations=tuple(citations), confidence=confidence,
+        ).write_all(out_dir),
+    )
+
+
 def build_default_registry() -> ToolRegistry:
     reg = ToolRegistry()
     reg.register(inventory_tool())
@@ -391,4 +435,5 @@ def build_default_registry() -> ToolRegistry:
     reg.register(sop_tool())
     reg.register(abc_xyz_tool())
     reg.register(sourcing_tool())
+    reg.register(ddmrp_tool())
     return reg
