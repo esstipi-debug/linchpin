@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -110,6 +111,34 @@ class KnowledgeBase:
             name: {n["id"]: n for n in g["nodes"] if "id" in n}
             for name, g in self._graphs.items()
         }
+        # Precompute searchable token sets + IDF once at load, so search()/
+        # bridge()/implements() never re-tokenize the whole graph on each call.
+        # Two fields per node: the *title* (label/id/norm_label — what it is) and
+        # the *body* (rationale — why it matters). IDF weights a rare, specific
+        # term (e.g. "newsvendor") above a ubiquitous one (e.g. "demand").
+        self._title_tokens: dict[str, dict[str, set[str]]] = {}
+        self._body_tokens: dict[str, dict[str, set[str]]] = {}
+        self._idf: dict[str, dict[str, float]] = {}
+        for name, nodes_by_id in self._index.items():
+            titles: dict[str, set[str]] = {}
+            bodies: dict[str, set[str]] = {}
+            doc_freq: dict[str, int] = {}
+            for nid, node in nodes_by_id.items():
+                title = _tokens(
+                    f"{node.get('label', '')} {node.get('id', '')} {node.get('norm_label', '')}"
+                )
+                body = _tokens(node.get("rationale") or "")
+                titles[nid] = title
+                bodies[nid] = body
+                for tok in title | body:
+                    doc_freq[tok] = doc_freq.get(tok, 0) + 1
+            n_docs = max(len(nodes_by_id), 1)
+            # log(1 + N/df): always positive, monotonically smaller as a token
+            # spreads across more nodes. A token in 1 node scores high; one in all
+            # scores near log(2).
+            self._title_tokens[name] = titles
+            self._body_tokens[name] = bodies
+            self._idf[name] = {tok: math.log(1 + n_docs / df) for tok, df in doc_freq.items()}
 
     def available(self) -> dict[str, int]:
         """Node count per graph (0 means the graph file was missing/empty)."""
@@ -132,23 +161,38 @@ class KnowledgeBase:
             if name in self._problems
         ]
 
-    def search(self, query: str, graph: str = "both", limit: int = 8) -> list[Concept]:
-        """Rank concept nodes by token overlap with the query.
+    # Field weights for ranking: a query hit in the title (what the concept *is*)
+    # counts more than one in the rationale (why it matters), so a terse-titled
+    # exact match still outranks a node that only mentions the term in passing.
+    _W_TITLE = 2.0
+    _W_BODY = 1.0
 
-        graph: "books", "code", or "both".
+    def search(self, query: str, graph: str = "both", limit: int = 8) -> list[Concept]:
+        """Rank concept nodes by IDF-weighted token overlap with the query.
+
+        Matches on the node title (label/id/norm_label) *and* its rationale, with
+        the title weighted higher; rarer query terms (high IDF) dominate common
+        ones. graph: "books", "code", or "both".
         """
         terms = _tokens(query)
         if not terms:
             return []
         names = ("books", "code") if graph == "both" else (graph,)
 
-        scored: list[tuple[int, Concept]] = []
+        scored: list[tuple[float, Concept]] = []
         for name in names:
-            for n in self._graphs.get(name, {}).get("nodes", []):
-                hay = _tokens(f"{n.get('label', '')} {n.get('id', '')} {n.get('norm_label', '')}")
-                score = len(terms & hay)
-                if score:
-                    scored.append((score, self._to_concept(n, name)))
+            idf = self._idf.get(name, {})
+            titles = self._title_tokens.get(name, {})
+            bodies = self._body_tokens.get(name, {})
+            for nid, node in self._index.get(name, {}).items():
+                title_hit = terms & titles.get(nid, set())
+                body_hit = (terms & bodies.get(nid, set())) - title_hit
+                if not title_hit and not body_hit:
+                    continue
+                score = self._W_TITLE * sum(idf.get(t, 0.0) for t in title_hit) + (
+                    self._W_BODY * sum(idf.get(t, 0.0) for t in body_hit)
+                )
+                scored.append((score, self._to_concept(node, name)))
 
         scored.sort(key=lambda x: (-x[0], x[1].label))
         return [c for _, c in scored[:limit]]
@@ -197,13 +241,14 @@ class KnowledgeBase:
         want = _tokens(f"{concept.label} {concept.id}")
         if not want:
             return None
+        titles = self._title_tokens.get("code", {})
         best: tuple[int, int, Concept] | None = None
-        for n in self._graphs["code"]["nodes"]:
+        for nid, n in self._index.get("code", {}).items():
             src = n.get("source_file") or ""
             if not src.endswith(".py"):
                 continue
             stem = Path(src).stem
-            have = _tokens(f"{n.get('label', '')} {n.get('id', '')} {n.get('norm_label', '')} {stem}")
+            have = titles.get(nid, set()) | _tokens(stem)
             score = len(want & have)
             # A 2-token hit is only trustworthy when the file is named after the
             # concept (eoq.py for "Economic Order Quantity"); otherwise a pair of

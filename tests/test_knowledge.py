@@ -6,6 +6,7 @@ code graph (graphify-out/) is gitignored, so tests that need it skip when absent
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,12 @@ from scm_agent.knowledge import (
 REPO = Path(__file__).resolve().parent.parent
 BOOKS = REPO / "knowledge" / "scm-books" / "graph.json"
 CODE = REPO / "graphify-out" / "graph.json"
+
+
+def _write_graph(path: Path, nodes: list[dict]) -> Path:
+    """Write a minimal node-link graph for deterministic ranking tests."""
+    path.write_text(json.dumps({"nodes": nodes, "links": []}), encoding="utf-8")
+    return path
 
 
 @pytest.fixture
@@ -125,3 +132,45 @@ def test_search_both_graphs_tags_origin(kb: KnowledgeBase) -> None:
     hits = kb.search("inventory", graph="both", limit=10)
     graphs = {h.graph for h in hits}
     assert graphs.issubset({"books", "code"})
+
+
+# -- ranking improvements (deterministic, synthetic graphs) -----------------
+
+
+def test_search_weights_title_over_rationale(tmp_path: Path) -> None:
+    """A title match outranks a node that only mentions the term in its rationale."""
+    g = _write_graph(tmp_path / "b.json", [
+        {"id": "a", "label": "Reorder Point", "norm_label": "reorder point",
+         "rationale": "trigger level"},
+        {"id": "b", "label": "Generic Concept", "norm_label": "generic concept",
+         "rationale": "the reorder point is computed here"},
+    ])
+    kb = KnowledgeBase(books_path=g, code_path=tmp_path / "none.json")
+    hits = kb.search("reorder point", graph="books")
+    assert hits[0].id == "a"
+
+
+def test_search_matches_via_rationale(tmp_path: Path) -> None:
+    """A term present only in the rationale still surfaces the node (recall)."""
+    g = _write_graph(tmp_path / "b.json", [
+        {"id": "a", "label": "Buffer Sizing", "norm_label": "buffer sizing",
+         "rationale": "handles intermittent croston demand"},
+    ])
+    kb = KnowledgeBase(books_path=g, code_path=tmp_path / "none.json")
+    hits = kb.search("croston", graph="books")
+    assert any(h.id == "a" for h in hits)
+
+
+def test_search_idf_favors_rarer_term(tmp_path: Path) -> None:
+    """A rare, specific term outweighs a term common across the corpus."""
+    nodes = [
+        {"id": f"d{i}", "label": f"Demand Topic {i}",
+         "norm_label": f"demand topic {i}", "rationale": ""}
+        for i in range(5)
+    ]
+    nodes.append({"id": "nv", "label": "Newsvendor", "norm_label": "newsvendor",
+                  "rationale": ""})
+    g = _write_graph(tmp_path / "b.json", nodes)
+    kb = KnowledgeBase(books_path=g, code_path=tmp_path / "none.json")
+    hits = kb.search("demand newsvendor", graph="books")
+    assert hits[0].id == "nv"
