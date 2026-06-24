@@ -1,13 +1,13 @@
 # SCM Books Knowledge Graph (L3 domain knowledge)
 
-A graphify knowledge graph built from **23 supply-chain books** (forecasting,
+A graphify knowledge graph built from **24 supply-chain books** (forecasting,
 pricing, revenue management, supply chain management, inventory optimization,
 manufacturing planning & control, operations management, logistics & operations
 strategy, sustainable logistics, **and supply-chain leadership**). This is the
 **domain knowledge** layer for the agent — distinct from the repo's
 `graphify-out/`, which graphs the *code*.
 
-- `graph.json` — 1824 nodes · 3640 edges · 122 communities (GraphRAG-ready)
+- `graph.json` — 1847 nodes · 3670 edges · 123 communities (GraphRAG-ready)
 - `graph.html` — interactive visual (open in a browser)
 - `GRAPH_REPORT.md` — communities, god nodes, surprising cross-book connections
 
@@ -54,6 +54,18 @@ design, sourcing, transportation, coordination, revenue management), and
 operations layer the graph lacked — quality/SPC & Six Sigma, process & layout
 design, facility location, project management (PERT/CPM), QFD, capacity/TOC, and
 decision analysis.
+
+**Jacobs & Chase** *Operations and Supply Chain Management* (15th ed., 2018) was
+scanned in full and added as the 24th source — but only the methods genuinely
+*new* to Linchpin (most of the book overlapped with Heizer/Chopra/Vollmann and was
+left out). The additions are a **queuing / waiting-line** family (M/M/1, M/M/c,
+M/D/1, finite-source, Kingman G/G/c) the graph entirely lacked, an **operational
+scheduling** family (Johnson's rule, assignment/Hungarian, dispatching rules,
+first-hour rostering), and **earned value**, the **learning curve**, **kanban /
+takt** sizing, **capacity cushion**, **acceptance-sampling** plan design, and
+**DEA**. Each is bridged to the `src/` module that implements it (`queuing.py`,
+`scheduling.py`, `earned_value.py`, `learning_curve.py`, `kanban.py`,
+`capacity_planning.py`, `acceptance_sampling.py`, `dea.py`).
 
 Concept node IDs are canonical
 (`bullwhip_effect`, `crostons_method`, `dynamic_pricing`), so the same concept
