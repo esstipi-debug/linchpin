@@ -55,3 +55,38 @@ def test_params_override_defaults():
     layout = generate_layout({"racks": {"modules": 3}, "building": {"levels": 2}})
     assert len(layout.racks) == 3
     assert layout.building.levels == 2
+
+
+# --- Task 3: Geometry QA ---
+
+from dataclasses import replace  # noqa: E402
+
+from warehouse.qa import MIN_AISLE_WIDTH_M, validate  # noqa: E402
+
+
+def test_default_layout_passes_qa():
+    assert validate(generate_layout({})) == []
+
+
+def test_qa_flags_rack_outside_building():
+    layout = generate_layout({})
+    moved = replace(layout.racks[0], x=layout.building.x + layout.building.width_m + 5.0)
+    layout = replace(layout, racks=(moved,) + layout.racks[1:])
+    issues = validate(layout)
+    assert any("outside" in i for i in issues)
+
+
+def test_qa_flags_narrow_aisle():
+    layout = generate_layout({})
+    narrow = replace(layout.aisles[0], width_m=MIN_AISLE_WIDTH_M - 0.5)
+    layout = replace(layout, aisles=(narrow,) + layout.aisles[1:])
+    assert any("aisle" in i and "minimum" in i for i in validate(layout))
+
+
+def test_qa_flags_missing_gates_and_bad_capacity():
+    layout = generate_layout({})
+    no_gates = replace(layout, gates=())
+    assert any("gate" in i for i in validate(no_gates))
+    bad_slot = replace(layout.slots[0], capacity_units=0.0)
+    bad = replace(layout, slots=(bad_slot,) + layout.slots[1:])
+    assert any("capacity" in i for i in validate(bad))
