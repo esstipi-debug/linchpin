@@ -71,6 +71,23 @@ python examples/query_knowledge.py --explain crostons_method
 A `graphify` MCP server is also wired in `.mcp.json` (serves
 `graphify-out/graph.json`) — its query tools appear when the binary is present.
 
+### Cross-session memory (the graphify loop)
+The code graph is rebuilt each session, but **what you learn persists** in
+`knowledge/graph-memory/` (committed). Aggregated lessons:
+[`documentation/GRAPH_LESSONS.md`](documentation/GRAPH_LESSONS.md) — **read it at
+session start** for orientation. When a structural query proves `useful` (or hits
+a `dead_end`, or you `corrected` a wrong turn), record it so the next session
+doesn't re-derive it, then regenerate the lessons and commit both in your PR:
+
+```bash
+graphify save-result --memory-dir knowledge/graph-memory --type query --outcome useful \
+  --question "..." --answer "..." --nodes "NodeA" "NodeB"
+graphify reflect --memory-dir knowledge/graph-memory \
+  --out documentation/GRAPH_LESSONS.md --graph graphify-out/graph.json
+```
+
+See [`knowledge/graph-memory/README.md`](knowledge/graph-memory/README.md).
+
 ## Dev conventions
 
 - **Python 3.11+**. Tests: `pytest tests/ -q` with `PYTHONPATH=.` (the hook persists it).
