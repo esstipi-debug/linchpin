@@ -9,6 +9,7 @@ from jobs import (
     abc_xyz_job,
     cost_to_serve_deliverable,
     cost_to_serve_job,
+    data_quality_job,
     ddmrp_job,
     deliverables,
     financial_kpis_job,
@@ -965,6 +966,53 @@ def forecast_tool() -> Tool:
     )
 
 
+# ---- data_quality (SKU master / MDM: dedup + GTIN validation + cleansing) ----
+
+def _data_quality_prepare(request: JobRequest, provider: LLMProvider) -> Prepared:
+    if not request.data_path:
+        return Prepared(status="needs_data", messages=["a product-master CSV (sku, name, gtin, unit cost) is required"])
+    try:
+        records = data_quality_job.prepare(request.data_path, request.params)
+    except (ValueError, FileNotFoundError) as exc:
+        return Prepared(status="needs_data", messages=[str(exc)])
+    if not records:
+        return Prepared(status="needs_data", messages=["no records found in the data"])
+    return Prepared(status="ok", payload=records)
+
+
+def _data_quality_run(payload: object, params: dict) -> Produced:
+    report = data_quality_job.run(payload, name_threshold=params.get("name_threshold", 90.0))
+    return Produced(report=report, summary=report.summary)
+
+
+def data_quality_tool() -> Tool:
+    return Tool(
+        key="data_quality",
+        title="Data Quality & SKU Master (MDM)",
+        description="Audit a product master: find duplicate SKUs (shared GTIN or fuzzy name), "
+                    "validate GTIN check digits (GS1 mod-10), flag completeness gaps, score "
+                    "overall quality, and rank remediation options into an exec-ready clean-up plan.",
+        intent_keywords=(
+            "data quality", "data cleansing", "data cleaning", "deduplicate", "deduplication",
+            "duplicate sku", "duplicate skus", "sku master", "master data", "mdm", "gtin",
+            "validate gtin", "upc", "ean", "data validation", "clean the data", "data audit",
+            "standardize skus",
+        ),
+        requires_data=True,
+        prepare=_data_quality_prepare,
+        run=_data_quality_run,
+        qa=lambda report: data_quality_job.verify(report),
+        deliver=lambda report, out_dir, client: data_quality_job.write_operational(report, out_dir, client),
+        deck=lambda report, out_dir, client, citations, confidence, options: replace(
+            data_quality_job.build_deck(report, client=client, citations=tuple(citations), confidence=confidence),
+            options=tuple(options),
+        ).write_all(out_dir),
+        # The remediation decision IS a set of ranked, executable choices -> surface them as
+        # the guided OPTIONS outcome on success (recommended default flagged).
+        options=lambda report: report.outcome,
+    )
+
+
 def build_default_registry() -> ToolRegistry:
     reg = ToolRegistry()
     reg.register(inventory_tool())
@@ -985,4 +1033,5 @@ def build_default_registry() -> ToolRegistry:
     reg.register(scheduling_tool())
     reg.register(risk_tool())
     reg.register(forecast_tool())
+    reg.register(data_quality_tool())
     return reg
