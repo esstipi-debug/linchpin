@@ -1,0 +1,15 @@
+# documentation/ — user & project guides
+
+Narrative documentation for **using** Linchpin and understanding its method and
+roadmap. For design briefs, contributor notes, and image assets, see
+[`../docs/`](../docs/).
+
+| File | What it covers |
+|------|----------------|
+| [GETTING_STARTED.md](GETTING_STARTED.md) | Install and first run |
+| [METHODOLOGY.md](METHODOLOGY.md) | Models, assumptions, and glossary |
+| [FAQ.md](FAQ.md) | Common questions |
+| [CAPABILITY_EXPANSION_PLAN.md](CAPABILITY_EXPANSION_PLAN.md) | The capability roadmap (Fases 0–5) |
+| [UI_DESIGN_BRIEF.md](UI_DESIGN_BRIEF.md) | Brief for the web UI |
+
+See also the top-level [README](../README.md) and [SECURITY.md](../SECURITY.md).
