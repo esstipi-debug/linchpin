@@ -40,8 +40,11 @@ deliverables/
 # large external datasets (Kaggle / M5 etc. — fetched locally, not versioned)
 data/kaggle/
 
-# Misc
-.claude/
+# Misc — version the shared hook + settings, ignore personal/local overrides
+.claude/*
+!.claude/settings.json
+!.claude/hooks/
+.claude/settings.local.json
 .secrets/
 *.log
 output/
