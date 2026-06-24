@@ -94,16 +94,13 @@ Expected: FAIL with `ModuleNotFoundError: No module named 'warehouse'`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-Create `warehouse/__init__.py`:
+Create `warehouse/__init__.py` (keep it import-light — docstring only — so the package never eagerly imports modules that arrive in later tasks):
 
 ```python
-"""Warehouse spatial twin (capa 1a): parametric geometry + 3D viewer."""
+"""Warehouse spatial twin (capa 1a): parametric geometry + 3D viewer.
 
-from .model import Layout
-from .generator import generate_layout
-from .qa import validate
-
-__all__ = ["Layout", "generate_layout", "validate"]
+Import from submodules: warehouse.model / .generator / .qa / .html_export.
+"""
 ```
 
 Create `warehouse/model.py`:
@@ -239,7 +236,7 @@ class Layout:
         )
 ```
 
-Note: `warehouse/__init__.py` imports `generate_layout`/`validate` which arrive in Tasks 2-3. Implement model first; if you run the suite before Task 2, temporarily import only `Layout` in `__init__.py` (or implement Tasks 1-3 before the first full-suite run). The per-task test command below targets the model tests directly, which only need `warehouse.model`.
+Note: keep `warehouse/__init__.py` import-light (docstring only). All code and tests import from submodules (`warehouse.model`, `warehouse.generator`, etc.), so the package never eagerly imports modules that arrive in later tasks. The per-task test command below targets the model tests directly (`warehouse.model`).
 
 - [ ] **Step 4: Run test to verify it passes**
 
