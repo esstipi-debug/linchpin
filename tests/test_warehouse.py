@@ -179,3 +179,39 @@ def test_warehouse_job_returns_layout_and_report():
     assert len(layout.racks) == 3
     assert report.startswith("# Warehouse layout")
     assert "Racks: 3" in report
+
+
+# --- Task 6: Agent capability ---
+
+
+from pathlib import Path  # noqa: E402
+
+from scm_agent import Orchestrator  # noqa: E402
+
+
+def test_warehouse_capability_end_to_end(tmp_path: Path) -> None:
+    orch = Orchestrator()
+    result = orch.run(
+        "generate a 3d warehouse layout",
+        overrides={"building": {"levels": 3}, "racks": {"modules": 4}},
+        job_type="warehouse_layout",
+        client="Test",
+        out_dir=tmp_path,
+    )
+    assert result.status == "ok"
+    assert result.tool == "warehouse_layout"
+    assert {"layout", "report", "viewer"} <= set(result.deliverables)
+    assert Path(result.deliverables["viewer"]).exists()
+
+
+def test_warehouse_capability_qa_fails_on_bad_params(tmp_path: Path) -> None:
+    orch = Orchestrator()
+    result = orch.run(
+        "warehouse layout",
+        overrides={"racks": {"modules": 400}},  # racks overflow the building
+        job_type="warehouse_layout",
+        client="Test",
+        out_dir=tmp_path,
+    )
+    assert result.status == "qa_failed"
+    assert result.qa_issues
