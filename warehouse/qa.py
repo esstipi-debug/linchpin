@@ -49,6 +49,9 @@ def validate(layout: Layout) -> list[str]:
     faces = {d.face for d in layout.docks}
     if len(faces) > 1:
         issues.append(f"docks span multiple building faces: {sorted(faces)}")
+    bad_faces = {d.face for d in layout.docks} - {"north", "south", "east", "west"}
+    if bad_faces:
+        issues.append(f"docks have invalid face(s): {sorted(bad_faces)}")
 
     slotted = {s.rack_id for s in layout.slots}
     for rid in {r.id for r in layout.racks} - slotted:

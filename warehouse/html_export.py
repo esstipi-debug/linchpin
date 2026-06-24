@@ -115,6 +115,6 @@ def to_html(layout: Layout, *, title: str = "Warehouse 3D") -> str:
     return (
         _HTML_TEMPLATE
         .replace("__TITLE__", title)
-        .replace("__DATA__", json.dumps(layout.to_dict()))
+        .replace("__DATA__", json.dumps(layout.to_dict()).replace("<", "\\u003c"))
         .replace("__SCENE__", _SCENE_JS)
     )

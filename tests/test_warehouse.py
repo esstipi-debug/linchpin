@@ -148,6 +148,13 @@ def test_qa_flags_docks_on_two_faces() -> None:
     assert any("multiple" in i or "faces" in i for i in issues)
 
 
+def test_qa_flags_invalid_dock_face():
+    layout = generate_layout({})
+    bad = replace(layout.docks[0], face="up")
+    layout = replace(layout, docks=(bad,) + layout.docks[1:])
+    assert any("invalid face" in i for i in validate(layout))
+
+
 def test_qa_flags_rack_with_no_slots() -> None:
     layout = generate_layout({})
     # Remove all slots for rack 0
@@ -166,9 +173,16 @@ def test_to_html_is_self_contained_and_embeds_layout():
     html = to_html(layout, title="Demo WH")
     assert "<html" in html and "Demo WH" in html
     assert "importmap" in html and "three" in html
-    # the exact serialized layout is embedded for the in-page renderer
-    assert json.dumps(layout.to_dict()) in html
+    # layout data is embedded (with "<" escaped to < for XSS safety)
+    assert "window.__LAYOUT__" in html
     assert "__LAYOUT__" in html
+
+
+def test_to_html_escapes_script_injection_in_params():
+    evil = "</script><script>alert(1)</script>"
+    html = to_html(generate_layout({"evil_key": evil}))
+    assert evil not in html            # verbatim injection must not survive
+    assert "\\u003c" in html           # the "<" was escaped in the embedded data
 
 
 # --- Task 5: Job playbook ---

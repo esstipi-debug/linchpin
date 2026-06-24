@@ -70,7 +70,7 @@ def _docks(building: Building, dp: dict) -> tuple[Dock, ...]:
     )
 
 
-def _interior(building: Building, rp: dict, slot_cap: float, rack_depth: float, margin: float):
+def _interior(building: Building, rp: dict, slot_cap: float, rack_depth: float, margin: float) -> tuple[tuple[Aisle, ...], tuple[Rack, ...], tuple[Slot, ...]]:
     modules = max(1, int(rp["modules"]))
     bays = max(1, int(rp["bays_per_rack"]))
     levels = max(1, int(building.levels))

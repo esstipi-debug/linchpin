@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from jobs import (
     abc_xyz_job,
     cost_to_serve_deliverable,
@@ -486,9 +488,8 @@ def _warehouse_run(payload: object, params: dict) -> Produced:
     return Produced(report=(layout, report_md), summary=summary)
 
 
-def _warehouse_deliver(report: object, out_dir: object, client: str) -> dict:
+def _warehouse_deliver(report: object, out_dir: object, client: str) -> dict[str, Path]:
     import json as _json
-    from pathlib import Path
 
     from warehouse.html_export import to_html
 
