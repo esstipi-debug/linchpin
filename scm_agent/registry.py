@@ -44,9 +44,9 @@ class Tool:
     qa: Callable[[object], list[str]]
     deliver: Callable[[object, Path, str], dict[str, Path]]
     # Optional premium deck (the "artifacts that sell" Deliverable), emitted alongside
-    # the operational files. Receives the L3 citations + confidence the orchestrator
-    # computed. None => this tool ships operational files only.
-    deck: Callable[[object, Path, str, list, float], dict[str, Path]] | None = None
+    # the operational files. Receives the L3 citations + confidence + the ranked options
+    # the orchestrator computed (rendered as the deck's action menu). None => operational only.
+    deck: Callable[[object, Path, str, list, float, list], dict[str, Path]] | None = None
     # Optional ranked, executable options on SUCCESS (the Guided Execution Layer's OPTIONS
     # outcome). When set, the orchestrator surfaces this GuidedOutcome as JobResult.guided
     # instead of the generic "executed" — so the tool offers >=2 ranked choices to act with

@@ -105,10 +105,15 @@ class Orchestrator:
         # Ground first: the premium deck weaves the L3 citations in, so they must
         # be resolved before the deliver path runs.
         citations = self._ground(tool)
+        # Compute the ranked options once: they become JobResult.guided AND the deck's
+        # action menu, so the sellable artifact carries the same choices the agent returns.
+        guided = tool.options(produced.report) if tool.options else None
+        deck_options = list(guided.options) if guided is not None else []
         written = tool.deliver(produced.report, out_dir / tool.key, request.client)
         if tool.deck is not None:
             deck_files = tool.deck(
-                produced.report, out_dir / tool.key, request.client, citations, intent.confidence
+                produced.report, out_dir / tool.key, request.client, citations,
+                intent.confidence, deck_options,
             )
             written.update({f"deck_{name}": path for name, path in deck_files.items()})
         summary = self._narrative(produced.summary, tool.title, citations)
@@ -116,7 +121,7 @@ class Orchestrator:
             status=STATUS_OK, tool=tool.key, confidence=intent.confidence,
             deliverables={name: str(path) for name, path in written.items()}, summary=summary,
             citations=citations, kb_warnings=self.knowledge.warnings(),
-            guided=tool.options(produced.report) if tool.options else None,
+            guided=guided,
         )
 
     def _ground(self, tool: Tool) -> list[str]:

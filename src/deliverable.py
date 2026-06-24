@@ -60,6 +60,7 @@ class Deliverable:
     kpis: tuple[Kpi, ...] = ()
     data_sources: tuple[DataSource, ...] = ()
     recommendations: tuple[str, ...] = ()
+    options: tuple = ()   # ranked ExecutionOptions (recommended first) - the action menu
     citations: tuple[str, ...] = ()
     confidence: float | None = None
     residual: str = ""
@@ -87,6 +88,18 @@ class Deliverable:
         if self.recommendations:
             out += ["## Recommendations", ""]
             out += [f"{i}. {r}" for i, r in enumerate(self.recommendations, 1)]
+            out.append("")
+
+        if self.options:
+            out += ["## Options to act", "",
+                    "Ranked, executable options - the recommended default is marked:", ""]
+            for i, o in enumerate(self.options, 1):
+                flag = " _(recommended)_" if getattr(o, "recommended", False) else ""
+                out.append(f"{i}. **{o.label}**{flag} - {o.summary}")
+                if getattr(o, "action", ""):
+                    out.append(f"   - Action: {o.action}")
+                if getattr(o, "tradeoffs", ""):
+                    out.append(f"   - Trade-off: {o.tradeoffs}")
             out.append("")
 
         if self.kpis:
@@ -161,6 +174,13 @@ class Deliverable:
             d.append(["Metric", "Source", "Refresh"])
             for ds in self.data_sources:
                 d.append([ds.field, ds.source, ds.cadence])
+
+        if self.options:
+            o = wb.create_sheet("Options")
+            o.append(["Option", "Recommended", "Summary", "Action", "Trade-off"])
+            for opt in self.options:
+                o.append([opt.label, "yes" if getattr(opt, "recommended", False) else "",
+                          opt.summary, getattr(opt, "action", ""), getattr(opt, "tradeoffs", "")])
 
         if self.citations:
             c = wb.create_sheet("Citations")

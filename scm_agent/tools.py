@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from jobs import (
     abc_xyz_job,
     cost_to_serve_deliverable,
@@ -95,8 +97,9 @@ def inventory_tool() -> Tool:
         run=_inventory_run,
         qa=lambda report: qa.verify(report),
         deliver=lambda report, out_dir, client: deliverables.write_all(report, out_dir, client=client),
-        deck=lambda report, out_dir, client, citations, confidence: inventory_deliverable.build(
-            report, client=client, citations=tuple(citations), confidence=confidence
+        deck=lambda report, out_dir, client, citations, confidence, options: replace(
+            inventory_deliverable.build(report, client=client, citations=tuple(citations), confidence=confidence),
+            options=tuple(options),
         ).write_all(out_dir),
     )
 
@@ -249,9 +252,12 @@ def cost_to_serve_tool() -> Tool:
         run=_cost_to_serve_run,
         qa=lambda report: cost_to_serve_job.verify(report),
         deliver=lambda report, out_dir, client: cost_to_serve_job.write_operational(report, out_dir, client),
-        deck=lambda report, out_dir, client, citations, confidence: cost_to_serve_deliverable.build(
-            report.portfolio, working_cap=report.working_cap, cash_release=report.cash_release,
-            client=client, citations=tuple(citations), confidence=confidence,
+        deck=lambda report, out_dir, client, citations, confidence, options: replace(
+            cost_to_serve_deliverable.build(
+                report.portfolio, working_cap=report.working_cap, cash_release=report.cash_release,
+                client=client, citations=tuple(citations), confidence=confidence,
+            ),
+            options=tuple(options),
         ).write_all(out_dir),
     )
 
@@ -303,8 +309,9 @@ def sop_tool() -> Tool:
         run=_sop_run,
         qa=lambda review: sop_job.verify(review),
         deliver=lambda review, out_dir, client: sop_job.write_operational(review, out_dir, client),
-        deck=lambda review, out_dir, client, citations, confidence: sop_deliverable.build(
-            review, client=client, citations=tuple(citations),
+        deck=lambda review, out_dir, client, citations, confidence, options: replace(
+            sop_deliverable.build(review, client=client, citations=tuple(citations)),
+            options=tuple(options),
         ).write_all(out_dir),
     )
 
@@ -351,8 +358,9 @@ def abc_xyz_tool() -> Tool:
         run=_abc_xyz_run,
         qa=lambda report: abc_xyz_job.verify(report),
         deliver=lambda report, out_dir, client: abc_xyz_job.write_operational(report, out_dir, client),
-        deck=lambda report, out_dir, client, citations, confidence: abc_xyz_job.build_deck(
-            report, client=client, citations=tuple(citations), confidence=confidence,
+        deck=lambda report, out_dir, client, citations, confidence, options: replace(
+            abc_xyz_job.build_deck(report, client=client, citations=tuple(citations), confidence=confidence),
+            options=tuple(options),
         ).write_all(out_dir),
     )
 
@@ -395,8 +403,9 @@ def sourcing_tool() -> Tool:
         run=_sourcing_run,
         qa=lambda report: sourcing_job.verify(report),
         deliver=lambda report, out_dir, client: sourcing_job.write_operational(report, out_dir, client),
-        deck=lambda report, out_dir, client, citations, confidence: sourcing_job.build_deck(
-            report, client=client, citations=tuple(citations), confidence=confidence,
+        deck=lambda report, out_dir, client, citations, confidence, options: replace(
+            sourcing_job.build_deck(report, client=client, citations=tuple(citations), confidence=confidence),
+            options=tuple(options),
         ).write_all(out_dir),
     )
 
@@ -439,8 +448,9 @@ def ddmrp_tool() -> Tool:
         run=_ddmrp_run,
         qa=lambda report: ddmrp_job.verify(report),
         deliver=lambda report, out_dir, client: ddmrp_job.write_operational(report, out_dir, client),
-        deck=lambda report, out_dir, client, citations, confidence: ddmrp_job.build_deck(
-            report, client=client, citations=tuple(citations), confidence=confidence,
+        deck=lambda report, out_dir, client, citations, confidence, options: replace(
+            ddmrp_job.build_deck(report, client=client, citations=tuple(citations), confidence=confidence),
+            options=tuple(options),
         ).write_all(out_dir),
     )
 
@@ -483,8 +493,9 @@ def landed_cost_tool() -> Tool:
         run=_landed_cost_run,
         qa=lambda report: landed_cost_job.verify(report),
         deliver=lambda report, out_dir, client: landed_cost_job.write_operational(report, out_dir, client),
-        deck=lambda report, out_dir, client, citations, confidence: landed_cost_job.build_deck(
-            report, client=client, citations=tuple(citations), confidence=confidence,
+        deck=lambda report, out_dir, client, citations, confidence, options: replace(
+            landed_cost_job.build_deck(report, client=client, citations=tuple(citations), confidence=confidence),
+            options=tuple(options),
         ).write_all(out_dir),
     )
 
@@ -533,8 +544,9 @@ def whatif_tool() -> Tool:
         run=_whatif_run,
         qa=lambda report: whatif_job.verify(report),
         deliver=lambda report, out_dir, client: whatif_job.write_operational(report, out_dir, client),
-        deck=lambda report, out_dir, client, citations, confidence: whatif_job.build_deck(
-            report, client=client, citations=tuple(citations), confidence=confidence,
+        deck=lambda report, out_dir, client, citations, confidence, options: replace(
+            whatif_job.build_deck(report, client=client, citations=tuple(citations), confidence=confidence),
+            options=tuple(options),
         ).write_all(out_dir),
     )
 
@@ -580,8 +592,9 @@ def financial_kpis_tool() -> Tool:
         run=_financial_kpis_run,
         qa=lambda report: financial_kpis_job.verify(report),
         deliver=lambda report, out_dir, client: financial_kpis_job.write_operational(report, out_dir, client),
-        deck=lambda report, out_dir, client, citations, confidence: financial_kpis_job.build_deck(
-            report, client=client, citations=tuple(citations), confidence=confidence,
+        deck=lambda report, out_dir, client, citations, confidence, options: replace(
+            financial_kpis_job.build_deck(report, client=client, citations=tuple(citations), confidence=confidence),
+            options=tuple(options),
         ).write_all(out_dir),
     )
 
@@ -630,8 +643,9 @@ def reconciliation_tool() -> Tool:
         run=_reconciliation_run,
         qa=lambda report: reconciliation_job.verify(report),
         deliver=lambda report, out_dir, client: reconciliation_job.write_operational(report, out_dir, client),
-        deck=lambda report, out_dir, client, citations, confidence: reconciliation_job.build_deck(
-            report, client=client, citations=tuple(citations), confidence=confidence,
+        deck=lambda report, out_dir, client, citations, confidence, options: replace(
+            reconciliation_job.build_deck(report, client=client, citations=tuple(citations), confidence=confidence),
+            options=tuple(options),
         ).write_all(out_dir),
     )
 
@@ -682,8 +696,9 @@ def returns_tool() -> Tool:
         run=_returns_run,
         qa=lambda report: returns_job.verify(report),
         deliver=lambda report, out_dir, client: returns_job.write_operational(report, out_dir, client),
-        deck=lambda report, out_dir, client, citations, confidence: returns_job.build_deck(
-            report, client=client, citations=tuple(citations), confidence=confidence,
+        deck=lambda report, out_dir, client, citations, confidence, options: replace(
+            returns_job.build_deck(report, client=client, citations=tuple(citations), confidence=confidence),
+            options=tuple(options),
         ).write_all(out_dir),
         # The disposition decision IS a set of ranked, executable choices -> surface them as
         # the guided OPTIONS outcome on success (not just an "executed" deck).
