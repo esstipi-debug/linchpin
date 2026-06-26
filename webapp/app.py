@@ -43,6 +43,7 @@ from webapp import observability, security  # noqa: E402
 
 DATA_FILE = _REPO_ROOT / "data" / "sample_demand_portfolio.csv"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+OPERATOR_DOCS_DIR = _REPO_ROOT / "documentation" / "operator"
 JOBS_OUTPUT_DIR = _REPO_ROOT / "webapp" / "_jobs_output"
 JOBS_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # cap /api/jobs uploads at 25 MB
@@ -480,5 +481,13 @@ def console() -> FileResponse:
     return FileResponse(STATIC_DIR / "prototype" / "index.html")
 
 
+@app.get("/operator")
+def operator_portfolio() -> FileResponse:
+    """The Operator Portfolio — renders documentation/operator/*.md as a web page."""
+    return FileResponse(STATIC_DIR / "operator" / "index.html")
+
+
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+# Read-only markdown source for the Operator Portfolio page (single source of truth).
+app.mount("/operator-docs", StaticFiles(directory=str(OPERATOR_DOCS_DIR)), name="operator-docs")
 app.mount("/jobs-output", StaticFiles(directory=str(JOBS_OUTPUT_DIR)), name="jobs-output")
