@@ -116,19 +116,26 @@
   .btn-ghost{color:var(--txt-2); border-color:var(--line-2); background:rgba(255,255,255,.02)}
   .btn-ghost:hover{border-color:var(--accent-bd); color:var(--txt)}
 
-  /* outcome chips */
+  /* outcome mini-cards */
   .outcomes{margin-top:42px; padding-top:26px; border-top:1px solid var(--line)}
   .outcomes .h{font-size:12.5px; color:var(--muted); margin-bottom:13px}
   .outcomes .h b{color:var(--accent); font-weight:600}
-  .chips{display:flex; gap:10px; flex-wrap:wrap}
-  .chip{
-    font-family:var(--mono); font-size:12px; font-weight:600; padding:7px 13px; border-radius:999px;
-    border:1px solid var(--line-2); color:var(--txt-2); background:var(--panel-2); display:inline-flex; gap:8px; align-items:center;
-  }
-  .chip i{width:7px;height:7px;border-radius:50%;font-style:normal}
-  .chip.x i{background:var(--ok)} .chip.o i{background:var(--accent)}
-  .chip.h i{background:var(--warn)} .chip.e i{background:var(--bad)}
-  .chip small{color:var(--faint); font-family:var(--sans); font-weight:500; letter-spacing:.2px}
+
+  /* outcome mini-cards: name + operational "se usa cuando" one-liner */
+  .outcome-grid{display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-top:16px}
+  .ocard{padding:13px 14px; border:1px solid var(--line); border-radius:12px; background:var(--panel-2)}
+  .ocard .tag{display:flex; align-items:center; gap:7px; font-family:var(--mono); font-size:11.5px; font-weight:700; letter-spacing:.3px}
+  .ocard .tag i{width:7px;height:7px;border-radius:50%;flex:none}
+  .ocard.x .tag i{background:var(--ok)} .ocard.o .tag i{background:var(--accent)}
+  .ocard.h .tag i{background:var(--warn)} .ocard.e .tag i{background:var(--bad)}
+  .ocard .when{margin-top:6px; font-size:12px; color:var(--muted); line-height:1.5}
+
+  /* onboarding-path strip (real week table from doc 06) */
+  .path{margin-top:52px}
+  .path-row{display:grid; grid-template-columns:repeat(5,1fr); gap:10px}
+  .pcard{padding:16px 15px; border:1px solid var(--line); border-radius:13px; background:linear-gradient(180deg,var(--panel),var(--panel-2)); box-shadow:var(--shadow)}
+  .pcard .wk{font-family:var(--mono); font-size:11px; font-weight:700; color:var(--accent); letter-spacing:.4px; text-transform:uppercase}
+  .pcard .rs{margin-top:8px; font-size:13px; color:var(--txt-2); line-height:1.5}
 
   /* ---------- Cards grid ---------- */
   .grid-h{font-family:var(--disp); font-size:13px; letter-spacing:1.5px; text-transform:uppercase; color:var(--muted); margin:52px 0 18px; font-weight:600}
@@ -195,7 +202,13 @@
     .scrim{display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:25}
     body.nav-open .scrim{display:block}
     .cards{grid-template-columns:1fr}
+    .outcome-grid{grid-template-columns:1fr 1fr}
+    .path-row{grid-template-columns:1fr 1fr}
     article{padding:0 20px 80px}
+  }
+  @media (max-width:520px){
+    .outcome-grid{grid-template-columns:1fr}
+    .path-row{grid-template-columns:1fr}
   }
 </style>
 </head>
@@ -230,13 +243,21 @@
   "use strict";
 
   // The 6 chapters. `file` is fetched from /operator-docs/ (single source of truth).
+  // `desc` quotes concrete content from the doc itself (a KPI, a runbook name, a
+  // real deliverable) instead of a generic one-liner — grounded, not marketing.
   var DOCS = [
-    { id:"rol",          file:"01_role_charter.md",        n:"01", label:"Carta del Rol",            desc:"Misión, responsabilidades, los KPIs que tú posees y cómo se mide tu éxito." },
-    { id:"division",     file:"02_division_of_labor.md",   n:"02", label:"División del Trabajo",     desc:"La línea exacta entre lo que hace Linchpin y lo que solo puedes hacer tú." },
-    { id:"metodologias", file:"03_methodologies.md",       n:"03", label:"Metodologías",             desc:"Los métodos a dominar: modos, cadencia S&OP, QA y aprobaciones." },
-    { id:"runbooks",     file:"04_runbooks.md",            n:"04", label:"Runbooks",                 desc:"Playbooks paso a paso para cada tarea que solo un humano puede cerrar." },
-    { id:"catalogo",     file:"05_deliverable_catalog.md", n:"05", label:"Catálogo de Entregables",  desc:"Qué puedes producir y vender, con tu valor agregado en cada uno." },
-    { id:"competencias", file:"06_competency_map.md",      n:"06", label:"Mapa de Competencias",     desc:"Matriz de habilidades, la biblioteca L3 y tu ruta de incorporación." }
+    { id:"rol",          file:"01_role_charter.md",        n:"01", label:"Carta del Rol",
+      desc:"6 KPIs propios del operador — p.ej. tiempo de cierre de desenlace, tasa de aprobación informada — y cómo se ve el éxito." },
+    { id:"division",     file:"02_division_of_labor.md",   n:"02", label:"División del Trabajo",
+      desc:"La tabla maestra Linchpin-vs-tú, línea por línea, anclada en el código real (guided.py, writeback.py, escalation.py)." },
+    { id:"metodologias", file:"03_methodologies.md",       n:"03", label:"Metodologías",
+      desc:"6 métodos a dominar: modos/persona, cadencia S&OP mensual, lectura de Fuentes L3, ciclo de venta, decisión y aprobación de writeback." },
+    { id:"runbooks",     file:"04_runbooks.md",            n:"04", label:"Runbooks",
+      desc:"8 playbooks nombrados — RB-3 Atender un HANDOFF, RB-5 Aprobar un writeback, RB-6 Enrutar una ESCALACIÓN — y más." },
+    { id:"catalogo",     file:"05_deliverable_catalog.md", n:"05", label:"Catálogo de Entregables",
+      desc:"Entregables reales por modo — política de inventario, ABC-XYZ, cost-to-serve, S&OP — con tu valor agregado en cada uno." },
+    { id:"competencias", file:"06_competency_map.md",      n:"06", label:"Mapa de Competencias",
+      desc:"Ruta de 4 semanas: semana 1 apruebas tu primer writeback, semana 4 facilitas un ciclo S&OP completo." }
   ];
   var DOCS_BASE = "/operator-docs/";
   var byFile={}, byId={}, idx={};
@@ -282,25 +303,36 @@
       '<section class="hero">'+
         '<span class="kicker"><span class="dot"></span>Manual de incorporación</span>'+
         '<h1>Portafolio del Operador</h1>'+
-        '<p class="lede">Linchpin calcula, fundamenta y prepara el siguiente paso seguro. '+
-          'Tú cierras el lazo: decides, ejecutas lo irreversible y vendes el resultado. '+
-          '<b>El humano produce 10×.</b></p>'+
+        '<p class="lede">Linchpin calcula en segundos lo que antes tomaba horas de análisis manual '+
+          '— pronóstico, política de inventario, ABC-XYZ, S&OP — y prepara el siguiente paso seguro. '+
+          '<b>Tú decides lo que el modelo no ve, ejecutas lo irreversible y vendes el resultado: '+
+          'el humano produce 10×.</b></p>'+
         '<div class="cta">'+
           '<a class="btn btn-primary" href="#rol">Empezar →</a>'+
           '<a class="btn btn-ghost" href="https://github.com/esstipi-debug/linchpin/tree/main/documentation/operator" target="_blank" rel="noopener">Ver en GitHub</a>'+
         '</div>'+
         '<div class="outcomes">'+
           '<div class="h">Todo resultado termina en uno de cuatro desenlaces — <b>tres te necesitan a ti</b>:</div>'+
-          '<div class="chips">'+
-            '<span class="chip x"><i></i>EXECUTED <small>agente</small></span>'+
-            '<span class="chip o"><i></i>OPTIONS <small>eliges</small></span>'+
-            '<span class="chip h"><i></i>HANDOFF <small>ejecutas</small></span>'+
-            '<span class="chip e"><i></i>ESCALATED <small>enrutas</small></span>'+
+          '<div class="outcome-grid">'+
+            '<div class="ocard x"><div class="tag"><i></i>EXECUTED</div><div class="when">Se usa cuando el agente ejecutó con seguridad, sin riesgo de negocio pendiente. Tu turno: revisar y archivar.</div></div>'+
+            '<div class="ocard o"><div class="tag"><i></i>OPTIONS</div><div class="when">Cuando hay <i>tradeoffs</i> de negocio que el modelo no ve. Hay una recomendada; tú eliges y autorizas.</div></div>'+
+            '<div class="ocard h"><div class="tag"><i></i>HANDOFF</div><div class="when">Un paso humano-único (llamar, firmar, negociar), ya redactado por el agente. Tú lo ejecutas en el mundo real.</div></div>'+
+            '<div class="ocard e"><div class="tag"><i></i>ESCALATED</div><div class="when">Disputa, legal o gasto sobre el umbral. El agente arma el paquete con SLA; tú confirmas la ruta y cierras.</div></div>'+
           '</div>'+
         '</div>'+
       '</section>'+
       '<div class="grid-h">Las 6 secciones</div>'+
-      '<div class="cards">'+cards+'</div>';
+      '<div class="cards">'+cards+'</div>'+
+      '<div class="path">'+
+        '<div class="grid-h">Ruta de incorporación — de 0 a operador pleno en 4 semanas</div>'+
+        '<div class="path-row">'+
+          '<div class="pcard"><div class="wk">Semana 1</div><div class="rs">σ_e, EOQ, (s,Q)/(R,S). Corres y revisas un entregable de inventario; apruebas tu primer writeback.</div></div>'+
+          '<div class="pcard"><div class="wk">Semana 2</div><div class="rs">ABC-XYZ, forecasting Croston/gamma. Produces política por segmento y paquete de pronóstico.</div></div>'+
+          '<div class="pcard"><div class="wk">Semana 3</div><div class="rs">Escalaciones, handoffs, DDMRP, landed cost. Cierras los 4 desenlaces con soltura.</div></div>'+
+          '<div class="pcard"><div class="wk">Semana 4</div><div class="rs">Modo SCM: S&OP, cost-to-serve, sourcing. Facilitas un ciclo S&OP completo.</div></div>'+
+          '<div class="pcard"><div class="wk">Continuo</div><div class="rs">Cierras brechas con la biblioteca L3 (23 libros). Subes de Competente a Avanzado.</div></div>'+
+        '</div>'+
+      '</div>';
     window.scrollTo(0,0);
   }
 
