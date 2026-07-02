@@ -10,7 +10,8 @@ The agent never mutates a client's system of record directly. It:
 
 This module is pure and ships an ``InMemoryStore`` reference implementation that
 stands in for a real connector (ERP / Excel / DB). Real connectors implement the
-same read/commit/rollback surface; the safety logic here is connector-agnostic.
+same read/applied_keys/claim/release/commit/rollback surface; the safety logic
+here is connector-agnostic.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import os
+import threading
 import time
 from dataclasses import dataclass
 
@@ -177,21 +179,73 @@ class AuditBookkeeping:
     ``src.writeback_store.SqliteAuditLedger``) - a persistent ledger that survives a
     process restart. Any store implementing read/commit/rollback (``InMemoryStore``
     below, or a real connector's system-of-record wrapper) composes this instead of
-    re-deriving the same ledger-or-dict branching.
+    re-deriving the same ledger-or-dict branching - including this class's
+    ``claim()``/``release()`` atomicity primitive, so every such store gets it for free.
+
+    ``_claims`` is a separate, ephemeral set of in-flight (claimed but not yet
+    recorded) keys - kept apart from ``_applied`` so ``applied_keys()``/``get()``
+    behavior is unchanged for every existing reader (e.g. ``rollback()``'s "is this
+    key known" check): a key is only ever visible there once ``record()`` completes,
+    exactly as before ``claim()`` existed.
     """
 
     def __init__(self, ledger: object | None = None) -> None:
         self._ledger = ledger
         self._applied: dict[str, AuditEntry] = {}
+        self._claims: set[str] = set()
+        self._claims_lock = threading.Lock()
 
     def applied_keys(self) -> set[str]:
         return self._ledger.applied_keys() if self._ledger is not None else set(self._applied)
+
+    def claim(self, idempotency_key: str, *, now: float | None = None) -> bool:
+        """Atomically reserve ``idempotency_key`` BEFORE any side-effecting write.
+
+        Returns True if the caller now owns the key and must follow up with exactly
+        one of ``record()`` (the write succeeded) or ``release()`` (it failed or was
+        aborted). Returns False if the key is already claimed by another in-flight
+        ``apply()`` call, or already fully recorded - the caller MUST NOT perform the
+        side-effecting write and should treat this as an idempotent skip.
+
+        This closes the check-then-act window ``apply()`` used to leave open: it used
+        to check ``idempotency_key in store.applied_keys()`` and only THEN call
+        ``store.commit()`` - two concurrent callers could both pass that check before
+        either finished committing, and both perform the side-effecting write (e.g.
+        both create a purchase order in Odoo for the same restock).
+
+        ``now`` is only meaningful for a ledger-backed store (see
+        ``src.writeback_store.SqliteAuditLedger.claim`` - it bounds how long an
+        orphaned claim from a crashed process can block a legitimate retry); the
+        in-memory path below ignores it, since a crashed process's memory - claims
+        included - is simply gone, with nothing left to go stale.
+        """
+        if self._ledger is not None:
+            return self._ledger.claim(idempotency_key, now=now)
+        with self._claims_lock:
+            if idempotency_key in self._applied or idempotency_key in self._claims:
+                return False
+            self._claims.add(idempotency_key)
+            return True
+
+    def release(self, idempotency_key: str) -> None:
+        """Release a claim that will NOT be followed by ``record()`` (the
+        side-effecting write raised or was aborted) - lets a legitimate retry proceed
+        instead of leaving the key permanently claimed. Only call this once the write
+        it guarded has definitively failed; calling it speculatively while that write
+        may still be genuinely in flight would let a second claimant through early."""
+        if self._ledger is not None:
+            self._ledger.release(idempotency_key)
+        else:
+            with self._claims_lock:
+                self._claims.discard(idempotency_key)
 
     def record(self, entry: AuditEntry) -> None:
         if self._ledger is not None:
             self._ledger.record(entry)
         else:
-            self._applied[entry.idempotency_key] = entry
+            with self._claims_lock:
+                self._applied[entry.idempotency_key] = entry
+                self._claims.discard(entry.idempotency_key)
 
     def get(self, idempotency_key: str) -> AuditEntry | None:
         if self._ledger is not None:
@@ -206,7 +260,7 @@ class AuditBookkeeping:
 
 
 class InMemoryStore:
-    """Reference system-of-record. Real connectors mirror read/_commit/rollback.
+    """Reference system-of-record. Real connectors mirror read/claim/release/_commit/rollback.
 
     ``ledger``, when given, persists the applied/audit bookkeeping (e.g. a
     ``src.writeback_store.SqliteAuditLedger``) so idempotency and rollback survive
@@ -223,6 +277,12 @@ class InMemoryStore:
 
     def applied_keys(self) -> set[str]:
         return self._audit.applied_keys()
+
+    def claim(self, idempotency_key: str, *, now: float | None = None) -> bool:
+        return self._audit.claim(idempotency_key, now=now)
+
+    def release(self, idempotency_key: str) -> None:
+        self._audit.release(idempotency_key)
 
     def commit(self, changeset: Changeset, approved_by: str) -> AuditEntry:
         # Capture originals BEFORE writing, so rollback is exact.
@@ -290,7 +350,13 @@ def apply(
 
     Refuses (``WritebackRefused``) when approval is required but missing, does not
     match this exact changeset (key AND content), or is expired. Idempotent on
-    ``idempotency_key``.
+    ``idempotency_key`` - and safe under concurrency: the key is atomically claimed
+    (``store.claim()``) before ``store.commit()`` ever runs, so two callers racing on
+    the same key cannot both perform the side-effecting write. A caller that loses
+    the claim gets the same ``idempotent_skip=True`` result as a sequential retry.
+    Failing closed: if claiming or committing raises for any reason, no duplicate
+    write is possible, but the exception still propagates (see below) rather than
+    being reported as a normal refusal or skip.
     """
     if now is None:
         now = time.time()
@@ -300,9 +366,19 @@ def apply(
                 f"approval required for tier '{changeset.risk_tier}' and is missing/mismatched/expired"
             )
 
-    if changeset.idempotency_key in store.applied_keys():
-        return ApplyResult(applied=False, idempotent_skip=True, audit_id=changeset.idempotency_key)
-
-    approved_by = approval.approved_by if approval is not None else "auto"
-    entry = store.commit(changeset, approved_by)
+    # claim() itself can raise (e.g. a ledger-backed store surfacing a transient
+    # SQLite error under real write contention, not just the IntegrityError it
+    # already handles internally as a normal "someone else has it" signal) - that
+    # must release the same as a failed commit(), not bypass cleanup by sitting
+    # outside this block. BaseException (not just Exception) so an interrupt
+    # (Ctrl-C mid-commit on a long-running CLI job) still releases the claim
+    # instead of leaving a legitimate retry permanently blocked.
+    try:
+        if not store.claim(changeset.idempotency_key, now=now):
+            return ApplyResult(applied=False, idempotent_skip=True, audit_id=changeset.idempotency_key)
+        approved_by = approval.approved_by if approval is not None else "auto"
+        entry = store.commit(changeset, approved_by)
+    except BaseException:
+        store.release(changeset.idempotency_key)
+        raise
     return ApplyResult(applied=True, idempotent_skip=False, audit_id=entry.idempotency_key)
