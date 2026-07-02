@@ -21,7 +21,7 @@ from src.writeback import (
     approve,
     stage,
 )
-from src.writeback_store import SqliteAuditLedger
+from src.writeback_store import CLAIM_STALE_SECONDS, SqliteAuditLedger
 
 
 def _mem_ledger() -> SqliteAuditLedger:
@@ -151,6 +151,23 @@ def test_ledger_release_allows_a_later_claim_to_succeed(tmp_path):
     assert ledger.claim("cs1") is True
     ledger.release("cs1")
     assert ledger.claim("cs1") is True
+
+
+def test_ledger_claim_can_be_reclaimed_after_it_goes_stale(tmp_path):
+    """A claim() with no matching record()/release() (e.g. the process that claimed
+    it was killed outright - SIGKILL, OOM-kill, power loss - before either could run)
+    must not permanently strand the key. A fresh claim() past the staleness window
+    may steal an orphaned claim, so a legitimate retry after a crash is not blocked
+    forever - the only persistent state this fix adds must not regress the
+    crash/redeploy durability this ledger otherwise exists to provide."""
+    ledger = SqliteAuditLedger(tmp_path / "l.sqlite3")
+    assert ledger.claim("cs1", now=0.0) is True
+
+    # Still fresh: a second claimant must NOT steal it.
+    assert ledger.claim("cs1", now=1.0) is False
+
+    # Long past the staleness window: the orphaned claim can be reclaimed.
+    assert ledger.claim("cs1", now=CLAIM_STALE_SECONDS + 1.0) is True
 
 
 def test_ledger_record_clears_the_claim(tmp_path):

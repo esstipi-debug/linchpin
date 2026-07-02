@@ -521,8 +521,8 @@ class _ReorderRuleStore:
     def applied_keys(self) -> set[str]:
         return self._audit.applied_keys()
 
-    def claim(self, idempotency_key: str) -> bool:
-        return self._audit.claim(idempotency_key)
+    def claim(self, idempotency_key: str, *, now: float | None = None) -> bool:
+        return self._audit.claim(idempotency_key, now=now)
 
     def release(self, idempotency_key: str) -> None:
         self._audit.release(idempotency_key)
@@ -602,8 +602,8 @@ class _DraftPoStore:
     def applied_keys(self) -> set[str]:
         return self._audit.applied_keys()
 
-    def claim(self, idempotency_key: str) -> bool:
-        return self._audit.claim(idempotency_key)
+    def claim(self, idempotency_key: str, *, now: float | None = None) -> bool:
+        return self._audit.claim(idempotency_key, now=now)
 
     def release(self, idempotency_key: str) -> None:
         self._audit.release(idempotency_key)

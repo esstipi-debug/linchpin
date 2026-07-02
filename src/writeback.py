@@ -198,7 +198,7 @@ class AuditBookkeeping:
     def applied_keys(self) -> set[str]:
         return self._ledger.applied_keys() if self._ledger is not None else set(self._applied)
 
-    def claim(self, idempotency_key: str) -> bool:
+    def claim(self, idempotency_key: str, *, now: float | None = None) -> bool:
         """Atomically reserve ``idempotency_key`` BEFORE any side-effecting write.
 
         Returns True if the caller now owns the key and must follow up with exactly
@@ -212,9 +212,15 @@ class AuditBookkeeping:
         ``store.commit()`` - two concurrent callers could both pass that check before
         either finished committing, and both perform the side-effecting write (e.g.
         both create a purchase order in Odoo for the same restock).
+
+        ``now`` is only meaningful for a ledger-backed store (see
+        ``src.writeback_store.SqliteAuditLedger.claim`` - it bounds how long an
+        orphaned claim from a crashed process can block a legitimate retry); the
+        in-memory path below ignores it, since a crashed process's memory - claims
+        included - is simply gone, with nothing left to go stale.
         """
         if self._ledger is not None:
-            return self._ledger.claim(idempotency_key)
+            return self._ledger.claim(idempotency_key, now=now)
         with self._claims_lock:
             if idempotency_key in self._applied or idempotency_key in self._claims:
                 return False
@@ -224,7 +230,9 @@ class AuditBookkeeping:
     def release(self, idempotency_key: str) -> None:
         """Release a claim that will NOT be followed by ``record()`` (the
         side-effecting write raised or was aborted) - lets a legitimate retry proceed
-        instead of leaving the key permanently claimed."""
+        instead of leaving the key permanently claimed. Only call this once the write
+        it guarded has definitively failed; calling it speculatively while that write
+        may still be genuinely in flight would let a second claimant through early."""
         if self._ledger is not None:
             self._ledger.release(idempotency_key)
         else:
@@ -270,8 +278,8 @@ class InMemoryStore:
     def applied_keys(self) -> set[str]:
         return self._audit.applied_keys()
 
-    def claim(self, idempotency_key: str) -> bool:
-        return self._audit.claim(idempotency_key)
+    def claim(self, idempotency_key: str, *, now: float | None = None) -> bool:
+        return self._audit.claim(idempotency_key, now=now)
 
     def release(self, idempotency_key: str) -> None:
         self._audit.release(idempotency_key)
@@ -346,6 +354,9 @@ def apply(
     (``store.claim()``) before ``store.commit()`` ever runs, so two callers racing on
     the same key cannot both perform the side-effecting write. A caller that loses
     the claim gets the same ``idempotent_skip=True`` result as a sequential retry.
+    Failing closed: if claiming or committing raises for any reason, no duplicate
+    write is possible, but the exception still propagates (see below) rather than
+    being reported as a normal refusal or skip.
     """
     if now is None:
         now = time.time()
@@ -355,11 +366,17 @@ def apply(
                 f"approval required for tier '{changeset.risk_tier}' and is missing/mismatched/expired"
             )
 
-    if not store.claim(changeset.idempotency_key):
-        return ApplyResult(applied=False, idempotent_skip=True, audit_id=changeset.idempotency_key)
-
-    approved_by = approval.approved_by if approval is not None else "auto"
+    # claim() itself can raise (e.g. a ledger-backed store surfacing a transient
+    # SQLite error under real write contention, not just the IntegrityError it
+    # already handles internally as a normal "someone else has it" signal) - that
+    # must release the same as a failed commit(), not bypass cleanup by sitting
+    # outside this block. BaseException (not just Exception) so an interrupt
+    # (Ctrl-C mid-commit on a long-running CLI job) still releases the claim
+    # instead of leaving a legitimate retry permanently blocked.
     try:
+        if not store.claim(changeset.idempotency_key, now=now):
+            return ApplyResult(applied=False, idempotent_skip=True, audit_id=changeset.idempotency_key)
+        approved_by = approval.approved_by if approval is not None else "auto"
         entry = store.commit(changeset, approved_by)
     except BaseException:
         store.release(changeset.idempotency_key)

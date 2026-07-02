@@ -359,6 +359,43 @@ def test_apply_releases_the_claim_when_commit_raises_so_a_retry_can_proceed():
     assert store.read("SKU-A")["reorder_point"] == 120
 
 
+def test_apply_calls_release_even_when_claim_itself_raises():
+    """apply()'s cleanup-on-failure must cover claim() too, not just commit() - a
+    transient ledger error (e.g. SQLite lock contention surfacing as
+    sqlite3.OperationalError, which is not the sqlite3.IntegrityError the ledger's
+    claim() already handles internally) must not bypass the same release()-then-
+    reraise contract a failing commit() already gets, or the key could be left
+    stranded with no claim ever actually held."""
+
+    class _FlakyClaimStore(InMemoryStore):
+        def __init__(self, *a, **kw) -> None:
+            super().__init__(*a, **kw)
+            self.claim_attempts = 0
+            self.release_calls: list[str] = []
+
+        def claim(self, idempotency_key, *, now=None):
+            self.claim_attempts += 1
+            if self.claim_attempts == 1:
+                raise RuntimeError("simulated transient ledger error")
+            return super().claim(idempotency_key, now=now)
+
+        def release(self, idempotency_key):
+            self.release_calls.append(idempotency_key)
+            super().release(idempotency_key)
+
+    store = _FlakyClaimStore({"SKU-A": {"reorder_point": 100}})
+    cs = stage(store, "erp", {"SKU-A": {"reorder_point": 120}},
+               risk_tier=TIER_REVERSIBLE, idempotency_key="cs1")
+
+    with pytest.raises(RuntimeError):
+        apply(store, cs, now=0.0, auto_apply_reversible=True)
+    assert store.release_calls == ["cs1"]
+
+    retry = apply(store, cs, now=0.0, auto_apply_reversible=True)
+    assert retry.applied
+    assert store.read("SKU-A")["reorder_point"] == 120
+
+
 def test_claim_then_release_allows_a_fresh_claim():
     store = _store()
     assert store.claim("cs1") is True
