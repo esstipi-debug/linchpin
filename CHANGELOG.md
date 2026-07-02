@@ -37,11 +37,7 @@
 
 ### Fixed
 - **World-class audit remediation (P0 + P1, PRs #82/#83)** — writeback `Approval` now requires an HMAC-SHA256 `signature` (env `LINCHPIN_APPROVAL_SECRET`) so an `Approval` can no longer be forged by constructing the dataclass directly; new `src/writeback_store.py::SqliteAuditLedger` for a persistent, restart-surviving audit/idempotency ledger; the Odoo connector's draft-PO write path now routes through the writeback safety plane instead of calling `execute_kw(..., "create")` directly (closes a duplicate-RFQ-on-retry gap); agent tool routing (`scm_agent/registry.py`) now matches on word boundaries with plural tolerance instead of raw substring matching; citation grounding (`scm_agent/knowledge.py`) re-ranks by IDF weight instead of raw token count and gates method-rule triggers to the active tool's own keyword domain; math fixes in `src/eoq.py` (volume-discount EOQ), `src/multi_echelon.py` (serial-GSM coupling), `src/newsvendor.py` (both optimizers), and `src/pricing.py`/`jobs/pricing.py` (`confident` logic).
-
-### Fixed
 - **`safety_stock()` regression coverage** — added a test pinned to Vandeput's Table 4.1 worked example that checks the exact signed value through `safety_stock()` itself, closing a gap where the module's own tests didn't catch a sign error in the core formula (only distant integration tests happened to).
-
-### Fixed
 - **`_ReorderRuleStore.commit()` / `_DraftPoStore.commit()` partial-failure rollback** — a write failing partway through a multi-change commit to Odoo no longer leaves earlier writes in that same call live with no audit trail; on any exception, everything written so far in that call is compensated (restored/deleted) before the failure propagates, so a retry with the same idempotency key can proceed cleanly.
 
 ### Changed
