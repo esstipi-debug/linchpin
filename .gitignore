@@ -42,6 +42,10 @@ deliverables/
 # large external datasets (Kaggle / M5 etc. — fetched locally, not versioned)
 data/kaggle/
 
+# local SQLite state (writeback audit ledger, MCP client keys) - never versioned;
+# the latter would otherwise leak paying-client names into git history.
+data/*.sqlite3
+
 # Misc — version the shared hook + settings, ignore personal/local overrides
 .claude/*
 !.claude/settings.json

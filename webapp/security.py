@@ -78,14 +78,22 @@ def _client_key(request: Request) -> str:
     return request.client.host if request.client else "anon"
 
 
-def rate_limit(request: Request) -> None:
-    """FastAPI dependency: 429 once a client exceeds RATE_LIMIT within RATE_WINDOW."""
+def rate_limit(request: Request, *, key: str | None = None) -> None:
+    """FastAPI dependency: 429 once a client exceeds RATE_LIMIT within RATE_WINDOW.
+
+    ``key`` overrides the default per-IP bucket (``_client_key(request)``) - pass
+    a caller identity (e.g. an authenticated MCP client's name) to give that
+    caller its own quota instead of sharing one bucket with every other request
+    from the same source IP (NAT, a corporate proxy, or another tenant behind the
+    same egress address would otherwise throttle each other). Callers that don't
+    pass ``key`` are unaffected - same IP-keyed behavior as before.
+    """
     limit = RATE_LIMIT
     if limit <= 0:  # feature off
         return
     window = RATE_WINDOW
     now = time.monotonic()
-    bucket = _BUCKETS[_client_key(request)]
+    bucket = _BUCKETS[key if key is not None else _client_key(request)]
     cutoff = now - window
     while bucket and bucket[0] < cutoff:
         bucket.popleft()

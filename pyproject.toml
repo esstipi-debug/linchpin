@@ -23,6 +23,7 @@ dependencies = [
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
+    "pytest-asyncio>=0.23",
     "ruff>=0.4",
 ]
 llm = [
@@ -45,6 +46,9 @@ forecast = [
     "statsforecast>=2.0,<3",
     "utilsforecast>=0.2",
 ]
+mcp = [
+    "mcp>=1.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/esstipi-debug/linchpin"
@@ -55,6 +59,7 @@ packages = ["src"]
 [tool.pytest.ini_options]
 pythonpath = "."
 testpaths = ["tests"]
+asyncio_mode = "auto"
 
 [tool.coverage.run]
 source = ["src"]

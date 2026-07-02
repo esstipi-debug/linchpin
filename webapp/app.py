@@ -34,6 +34,8 @@ from fastapi.staticfiles import StaticFiles  # noqa: E402
 from scm_agent import Orchestrator  # noqa: E402
 from src.constraints import InventoryItem, allocate_under_budget  # noqa: E402
 from src.forecasting import ForecastResult, forecast_demand  # noqa: E402
+from src.mcp_keys import DEFAULT_PATH as MCP_KEYS_DEFAULT_PATH  # noqa: E402
+from src.mcp_keys import McpKeyStore  # noqa: E402
 from src.policies import continuous_review_sq, periodic_review_rs  # noqa: E402
 from src.sources import CsvDemandSource  # noqa: E402
 from warehouse.generator import generate_layout  # noqa: E402
@@ -41,6 +43,8 @@ from warehouse.html_export import to_html  # noqa: E402
 from warehouse.qa import validate as validate_layout  # noqa: E402
 from webapp import observability, security  # noqa: E402
 from webapp.decisions import router as decisions_router  # noqa: E402
+from webapp.mcp_auth import McpKeyAuthMiddleware  # noqa: E402
+from webapp.mcp_server import build_mcp_server  # noqa: E402
 
 DATA_FILE = _REPO_ROOT / "data" / "sample_demand_portfolio.csv"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -57,6 +61,8 @@ PERIODS_PER_YEAR = 52.0
 MAX_LEAD_PERIODS = 52.0
 
 _ORCHESTRATOR: Orchestrator | None = None
+_MCP_KEY_STORE: McpKeyStore | None = None
+MCP_KEYS_PATH = os.environ.get("LINCHPIN_MCP_KEYS_PATH", "").strip() or MCP_KEYS_DEFAULT_PATH
 
 
 def _get_orchestrator() -> Orchestrator:
@@ -64,6 +70,16 @@ def _get_orchestrator() -> Orchestrator:
     if _ORCHESTRATOR is None:
         _ORCHESTRATOR = Orchestrator()
     return _ORCHESTRATOR
+
+
+def _get_mcp_key_store() -> McpKeyStore:
+    """Lazy singleton, same pattern as _get_orchestrator(). Looked up fresh by
+    McpKeyAuthMiddleware on every request (not baked in at mount time), so tests
+    can monkeypatch this function to swap in an in-memory store."""
+    global _MCP_KEY_STORE
+    if _MCP_KEY_STORE is None:
+        _MCP_KEY_STORE = McpKeyStore(MCP_KEYS_PATH)
+    return _MCP_KEY_STORE
 
 
 class SafeJSONResponse(JSONResponse):
@@ -100,6 +116,19 @@ if _PROD_WARNINGS and security.REQUIRE_SECURE:
 
 # Decision-support guardrail calculators (the human-facing Guided Execution Layer).
 app.include_router(decisions_router)
+
+# Read-only MCP server (Phase A go-to-market: sell analysis-only access to other
+# AI agents). Shares this process's orchestrator (avoids loading the knowledge
+# graph twice) but is gated by its OWN per-client key store, not LINCHPIN_API_KEY -
+# see webapp/mcp_auth.py. No writeback tool (e.g. odoo_replenishment) is ever
+# exposed here; see webapp/mcp_server.py for the exact 8-tool surface.
+_mcp_asgi_app = build_mcp_server(_get_orchestrator()).streamable_http_app()
+# A lambda, not the bare function: `_get_mcp_key_store` must be looked up by NAME
+# in this module's globals on every call (late binding), not captured by value
+# here at mount time - otherwise tests monkeypatching `app_module._get_mcp_key_store`
+# would never reach the already-constructed middleware instance below.
+_mcp_asgi_app.add_middleware(McpKeyAuthMiddleware, key_store_getter=lambda: _get_mcp_key_store())
+app.mount("/mcp", _mcp_asgi_app)
 
 
 def _reject_nonfinite(token: str) -> float:
