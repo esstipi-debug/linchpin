@@ -1,9 +1,10 @@
 # Development dependencies (tests, coverage, linting, web UI test client).
-# Canonical source is pyproject.toml — equivalent to: pip install -e ".[dev,web]"
+# Canonical source is pyproject.toml — equivalent to: pip install -e ".[dev,web,mcp]"
 # Kept for `pip install -r requirements-dev.txt` workflows.
 -r requirements.txt
 pytest>=7.0
 pytest-cov>=4.0
+pytest-asyncio>=0.23  # async tests for webapp/mcp_server.py
 ruff>=0.4
 # web UI (webapp/) + its test client
 fastapi>=0.110
@@ -13,3 +14,5 @@ python-multipart>=0.0.9  # required by POST /api/jobs (Form/File); app import fa
 # modern forecasting wrapper (src/forecasting_auto.py) — mirrors pyproject [forecast]
 statsforecast>=2.0,<3
 utilsforecast>=0.2
+# MCP server (webapp/mcp_server.py) — mirrors pyproject [mcp]
+mcp>=1.0

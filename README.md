@@ -402,3 +402,4 @@ power-bi/             CSV dataset + M queries + DAX + SETUP.md
 | [`scm_agent/README.md`](scm_agent/README.md) | The agent reference |
 | [Security](SECURITY.md) | Threat model, enforced controls, hardening checklist |
 | [Deployment](docs/DEPLOYMENT.md) | Production hardening: env controls, reverse proxy, load notes |
+| [MCP Server](docs/MCP_SERVER.md) | Selling read-only analysis access to other AI agents: connecting, key issuance, what's exposed |
