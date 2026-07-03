@@ -1,18 +1,56 @@
 # Linchpin — Session Handoff
 
-**Date:** 2026-07-03 · **Repo:** `esstipi-debug/linchpin` (now **private**) · **Branch:** `main` @ `e84ca2a` (PRs up to **#98**, plus an unmerged in-progress branch fixing 2 production bugs found live, below)
+**Date:** 2026-07-03 · **Repo:** `esstipi-debug/linchpin` (now **private**) · **Branch:** `main` @ `334e954` (PRs up to **#100**)
 **Purpose:** pick up Linchpin work in a fresh session without re-deriving context.
-**Resume here — THE APP IS LIVE.** Both §3.2 follow-up security gaps are closed (PRs #94, #95). §3.1's deploy host **pivoted from Railway to Fly.io** (the user's Railway trial ran out before a deploy happened) — and this time the deploy actually ran, all the way through, using a Fly API token the user provided: **`https://linchpin.fly.dev` is live right now**, `/api/health` returns real data, `/` is 200, `/mcp` mounts correctly, `POST /api/jobs` correctly 401s without a key. Two real production bugs surfaced and were fixed during the live deploy (not caught by local `docker build`/`docker run` testing, which only ran the container standalone without a Fly Volume attached):
+**Resume here — THE APP IS LIVE, BUT THE PRODUCTION DEPLOY IS ONE FIX BEHIND `main`.**
+`https://linchpin.fly.dev` is up (`/api/health`, `/` both fine), but PR #100
+(merged, `334e954`) fixes 3 bugs that mean **no real MCP client has ever
+successfully completed a tool call against the deployed server** — this was
+found by actually driving a real MCP client round trip through the mounted
+app, something no prior session had done (earlier "verified" checks only
+covered `/api/health`, `/`, and that `/mcp` 307-redirected — never an
+authenticated `initialize`+`tools/call`). The 3 bugs, all fixed on `main` now:
+1. `app.mount()` doesn't propagate ASGI lifespan into the sub-app -> the
+   FastMCP session manager's task group never started -> every real call past
+   auth 500'd ("Task group is not initialized").
+2. FastMCP's own default internal path ("/mcp") doubled onto the parent mount
+   path ("/mcp") -> the only path that actually worked was `/mcp/mcp`, one
+   segment longer than the documented client URL (`docs/MCP_SERVER.md`).
+3. FastMCP's DNS-rebinding Host-header check auto-allowlists only
+   localhost/127.0.0.1/::1 -> a public deploy 421'd every real client
+   regardless of a valid key. Fixed with `LINCHPIN_MCP_ALLOWED_HOSTS` (new env
+   var, see `docs/DEPLOYMENT.md`).
 
-1. **2 uvicorn workers OOM-killed the 512mb VM** in a crash-restart loop within ~10-25s of every boot — each worker independently loads pandas/numpy/scipy + the orchestrator + the L3 graph, so memory cost scales linearly with `--workers`. Fixed: `WEB_CONCURRENCY=1` in `fly.toml`.
-2. **Mounting the persistent Volume at `/app/data` shadowed the small static sample CSVs baked into the image at that same path** (a Volume mount hides whatever's already on disk at its destination) — crashed with `FileNotFoundError` on `data/sample_demand_portfolio.csv`. Fixed: Volume now mounts at `/data` instead, `LINCHPIN_MCP_KEYS_PATH=/data/mcp_keys.sqlite3`.
+**Production has NOT been redeployed with this fix yet** — that needs the
+operator's Fly credentials (not available in the session that found/fixed
+this). **The actual next action, before anything else in §3.1 below:**
+`fly deploy --app linchpin` from a fresh `main` checkout, AND
+`fly secrets set LINCHPIN_MCP_ALLOWED_HOSTS=linchpin.fly.dev`, then re-verify
+with a freshly issued key (`examples/issue_mcp_key.py`) before trusting the
+live server or listing it anywhere public. Listing a still-broken server on
+Glama/Smithery/PulseMCP would burn the first impression with real visitors.
 
-Both fixes are applied live (confirmed stable, health checks passing) but **not yet committed to `main`** as of this write-up — they're sitting on an unmerged branch (see §3.1 below for exact state). **Do not re-run `fly deploy` from a stale `main` checkout without first merging that branch**, or you'll reintroduce both bugs. A separate bug was ALSO caught and fixed earlier the same session in the already-merged `railway.json`/`docs/DEPLOYMENT.md` (PR #98): `pip install -e ".[web]"` alone omits the `mcp` extra, which `webapp/app.py` hard-requires (`ModuleNotFoundError: No module named 'mcp'`) — fixed to `.[web,mcp].` `railway.json` + its docs section remain kept as a demoted "2b. Alternative" in case Railway becomes viable again later. The user's stated objective for this whole project, verbatim: *"el objetivo de este agente es generar dinero"* — default to whatever advances revenue over further engine/backlog polish unless told otherwise. **Immediate next step, now that the server is actually live: register with the MCP registry and list on Glama/Smithery/PulseMCP (§3.1) — the prerequisite that blocked this for two sessions is finally gone.**
+Earlier in the same overall effort (PR #99, `9101c7a`, already on `main`
+before this): `WEB_CONCURRENCY=1` (2 uvicorn workers OOM-killed the 512mb VM)
+and the persistent Volume moved from `/app/data` to `/data` (it was shadowing
+baked-in sample CSVs) — both already live and stable, unaffected by the above.
+A separate bug was caught earlier still in `railway.json`/`docs/DEPLOYMENT.md`
+(PR #98, merged): `pip install -e ".[web]"` alone omits the `mcp` extra, which
+`webapp/app.py` hard-requires — fixed to `.[web,mcp]`. `railway.json` +
+`docs/DEPLOYMENT.md` §2b are kept in case Railway becomes viable again later.
+
+The user's stated objective for this whole project, verbatim: *"el objetivo
+de este agente es generar dinero"* — default to whatever advances revenue
+over further engine/backlog polish unless told otherwise. Also in flight,
+same session that found the bug above: a real installable **Odoo Apps Store
+module** (Odoo.sh/on-premise only, not Odoo Online — see
+[[linchpin-odoo-store-module]] for why), calling this now-fixed MCP surface
+via per-client keys.
 
 > A new Claude Code session in this repo also auto-loads memory: `MEMORY.md` →
 > [[linchpin-project]], [[linchpin-priority-monetization]], [[linchpin-monetization-plan]],
 > [[linchpin-audit-fixes-2026-07]], [[linchpin-formula-injection-fix]],
-> [[linchpin-concurrent-sessions]]. This file is the human-readable, in-repo
+> [[linchpin-concurrent-sessions]], [[linchpin-odoo-store-module]]. This file is the human-readable, in-repo
 > consolidation — memory has the play-by-play and the full research trail
 > (real 2026 market data on MCP directories, x402 adoption, Odoo Store pricing).
 
@@ -59,9 +97,12 @@ split, AI-agent directories, GEO, a portfolio site vs. Upwork/Fiverr commission)
 
 ### 3.1 [explicitly requested by the user] Publish the MCP server on free directories
 
-**The prerequisite that blocked this for two sessions is now gone: the server
-is live at `https://linchpin.fly.dev`, verified end-to-end (2026-07-03).** How
-it got there: the user pasted a Fly API token directly in chat (flagged as
+**Do this only AFTER redeploying with PR #100's fix (see the top of this file)
+and re-verifying a real authenticated tool call against production** — the
+"verified end-to-end" claim below was wrong: it checked `/api/health`, `/`,
+and that `/mcp` 307-redirected, but never a real client round trip, and a real
+round trip 500s/404s/421s on the deployed code today. How the deploy itself
+got there (this part is still accurate): the user pasted a Fly API token directly in chat (flagged as
 now-exposed, worth rotating); that token was used to install `flyctl`
 non-interactively, create the `linchpin` app + a 1GB Volume in the `personal`
 org (region `iad`), stage fresh secrets, and run `fly deploy`. Two real
