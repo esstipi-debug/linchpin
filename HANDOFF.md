@@ -1,7 +1,26 @@
 # Linchpin — Session Handoff
 
-**Date:** 2026-07-03 · **Repo:** `esstipi-debug/linchpin` (now **private**) · **Branch:** `main` @ `9e33e67` (PRs up to **#101**)
+**Date:** 2026-07-03 · **Repo:** `esstipi-debug/linchpin` (now **private**) · **Branch:** `main` @ `26d7dc8` (PRs up to **#104**)
 **Purpose:** pick up Linchpin work in a fresh session without re-deriving context.
+
+**Same-day update, after the MCP fix below:** the Odoo Store module
+(`odoo_addon/linchpin_dry_run/`) shipped (PR #103) - built, adversarially
+reviewed (6 real findings fixed: SSRF, error-leak, TransientModel data loss,
+overbroad access group, inaccurate data-sent disclosure, documented plaintext
+key storage), Docker-install-verified against real Odoo 17, and **live UI
+click-through tested in a real browser** (user authorized full browser
+control) - settings, group-gated menu, and a real request to production
+Linchpin all confirmed working, including the auth-rejection error path
+staying clean (no leaked response body). See [[linchpin-odoo-store-module]]
+for the full account. Also: tried to actually list the MCP server on
+Glama/Smithery/PulseMCP directly in a browser - all three gate behind account
+creation/login, which is out of scope for an agent to do on the operator's
+behalf. Prepared `server.json` (PR #104) for the **official MCP registry**
+instead, which all three read from - the operator still needs to run
+`mcp-publisher login github` + `mcp-publisher publish` themselves (~2 min,
+real GitHub OAuth, can't be done by an agent). See [[linchpin-monetization-plan]]
+§5 for the full finding.
+
 **Resume here — THE MCP SERVER ACTUALLY WORKS NOW, GENUINELY VERIFIED (not just "deploy succeeded").**
 PR #100 (merged, `334e954`) fixed 3 compounding bugs that meant **no real MCP
 client had ever successfully completed a tool call against the deployed
