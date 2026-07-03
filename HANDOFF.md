@@ -1,13 +1,15 @@
 # Linchpin — Session Handoff
 
-**Date:** 2026-07-02 · **Repo:** `esstipi-debug/linchpin` · **Branch:** `main` @ `aea7c7a` (PRs up to **#87**)
+**Date:** 2026-07-02 · **Repo:** `esstipi-debug/linchpin` (now **private**) · **Branch:** `main` @ `c982bdc` (PRs up to **#92**)
 **Purpose:** pick up Linchpin work in a fresh session without re-deriving context.
-**Resume here:** the world-class audit (10 sections, multi-agent + adversarial verification, scored ~6.25/10) is now **fully closed out**. All P0 (trust/safety) + P1 (engine correctness) findings from the original pass (PR #82, #83) plus all three items flagged as still-outstanding in the previous handoff are fixed and merged: odoo.py partial-failure rollback (**PR #86**), the `safety_stock()` sign-flip test gap (**PR #85**), and the stale 3-4-capability README/docs (**PR #87**). A **separate, currently-running session** has also just committed a fix for the writeback idempotency check-then-act race (commit `ee65bcc` on branch `fix/writeback-idempotency-race`, in worktree `../.wt-idempotency-race`) but has **not yet opened a PR** — don't duplicate it; check `gh pr list --head fix/writeback-idempotency-race` and that worktree's `git log`/`git status` before starting related work.
+**Resume here:** the code side is in the best shape it's been — the world-class audit is fully closed out, AND the project's first revenue-generating surface (a read-only MCP server) is live on `main`. **The explicit next move the user asked for: list that MCP server on the free public directories (Glama/Smithery/PulseMCP) — see §3.1, it needs a deployment step first that hasn't happened yet.** The user's stated objective for this whole project, verbatim: *"el objetivo de este agente es generar dinero"* — default to whatever advances revenue over further engine/backlog polish unless told otherwise.
 
 > A new Claude Code session in this repo also auto-loads memory: `MEMORY.md` →
-> [[linchpin-project]], [[linchpin-verified-audit]], [[linchpin-coverage-roadmap]],
-> [[linchpin-audit-fixes-2026-07]] (the audit + all fixes, in full detail).
-> This file is the human-readable, in-repo consolidation — memory has the play-by-play.
+> [[linchpin-project]], [[linchpin-priority-monetization]], [[linchpin-monetization-plan]],
+> [[linchpin-audit-fixes-2026-07]], [[linchpin-formula-injection-fix]],
+> [[linchpin-concurrent-sessions]]. This file is the human-readable, in-repo
+> consolidation — memory has the play-by-play and the full research trail
+> (real 2026 market data on MCP directories, x402 adoption, Odoo Store pricing).
 
 ---
 
@@ -18,81 +20,140 @@ Agentic supply-chain AI: a deterministic Python engine (EOQ, safety stock,
 facility location, DRP, transportation, FEFO, financial KPIs, supplier
 scorecards, MCDM sourcing, landed cost, cost-to-serve, S&OP, reverse logistics,
 warehouse layout, voice doc-reader) + an orchestrator agent, grounded in an
-**L3 knowledge graph** (24 SCM books/sources) and packaged through a
+**L3 knowledge graph** (24 curated SCM sources) and packaged through a
 **client-ready deliverable generator** (md + xlsx, cited). Where it can't act
 itself, it hands off a ready-to-execute packet (the "never unprotected" Guided
 Execution Layer, `src/guided.py`). Live **Odoo ERP connector** (`src/connectors/odoo.py`)
 reads/writes through the safe-staging plane (`src/writeback.py`).
-Positioned to win Upwork inventory + SCM gigs (human sells, Linchpin produces 10x)
-— see [[linchpin-project]] for the current go-to-market thread (Upwork Project
-Catalog packaging, Odoo Apps Store, MCP-server-with-paywall exploration).
+
+**New as of this session:** Linchpin now also **exposes** an MCP server of its
+own (`webapp/mcp_server.py`, mounted at `/mcp`), not just consumes one
+(graphify). This is Phase A of an explicit, memory-tracked go-to-market plan —
+see [[linchpin-monetization-plan]] for the full ladder (MCP read-only → Stripe
+metered → x402 pay-per-call) and where-to-publish research (Odoo Apps Store 70%
+split, AI-agent directories, GEO, a portfolio site vs. Upwork/Fiverr commission).
 
 ---
 
-## 2. Current state (verified 2026-07-02, after PRs #85-#87)
+## 2. Current state (verified 2026-07-02, after PR #92)
 
-- **Tests:** 1131 passing, 13 skipped (`PYTHONPATH=. .venv/Scripts/python.exe -m pytest tests/ -q`). `ruff check src tests examples` clean.
-- **Agent surface: 34 tools** (verify with `build_default_registry()` — do not trust any doc's number, including this one, without re-running that check). README.md and `scm_agent/README.md` now list all 34 by area and both point at the registry as the source of truth, so this should stay honest longer than the old hardcoded "3-4 capabilities" framing did.
-- **L3 graph** (`knowledge/scm-books/graph.json`): ~1847 nodes, **24 distinct sources** (verified directly from the committed graph's `source_file` field, not from prose — the book-count claims across README/CLAUDE.md had drifted to 17/23 and are now both fixed to 24).
-- **Writeback safety plane** (`src/writeback.py`): unchanged this session — `Approval` HMAC-signed, `SqliteAuditLedger` for persistent audit/idempotency. **New this session:** `src/connectors/odoo.py`'s `_ReorderRuleStore.commit()` and `_DraftPoStore.commit()` now roll back (compensate) whatever was already written to Odoo if a later write in the same `commit()` call raises, instead of leaving partial writes live with no audit trail (PR #86). Known residual: a failure *during* the compensation itself is not recoverable by this local-only approach and needs manual reconciliation — documented in a code comment, not fixed further (would need a real distributed transaction).
-- **`safety_stock()`** now has a regression test pinned to Vandeput's Table 4.1 worked example, checked through the exact signed value (PR #85) — closes the audit's mutation-testing finding that the module's own tests didn't catch a sign flip in the core formula.
-- **Odoo connector** (`src/connectors/odoo.py`): read + both write paths (reorder points, draft POs) route through the writeback plane; bounded timeout + retry-with-backoff for read-only ORM methods. **Still needs**: validation against a REAL Odoo instance (user has none yet — do not treat this as urgent unless they say they have one).
-- **README.md / scm_agent/README.md**: fixed this session (PR #87) — now describe all 34 tools by area, source-of-truth pointer to `build_default_registry()`, and corrected several other drifted numbers (books 17→24, tests 600+→1100+, KB concept nodes 430→~1850).
+- **Tests:** 1198 passing, 13 skipped (`PYTHONPATH=. .venv/Scripts/python.exe -m pytest tests/ -q`). `ruff check src tests examples` clean.
+- **Agent surface: still 34 tools** in the registry (`build_default_registry()` — don't trust any doc's number without re-running that check). Of those, **8 are also reachable over MCP** (see below) — the rest remain internal/dashboard-only for now.
+- **Repo visibility: private** (the user made it private mid-session; it was public before, and the committed `knowledge/scm-books/graph.json` — 2.2MB of curated 24-source distillation — was exposed the whole time it was public). Not retroactive: any pre-existing clone/fork keeps its copy.
+- **MCP server (NEW, PR #91, shipped):** `webapp/mcp_server.py`, mounted at `/mcp` on the existing FastAPI app, Streamable HTTP transport. Exposes exactly 8 read-only tools (`linchpin_inventory_optimize`, `linchpin_classify_abc_xyz`, `linchpin_newsvendor_order_quantity`, `linchpin_forecast_demand`, `linchpin_financial_kpis`, `linchpin_price_optimize`, `linchpin_audit_data_quality`, `linchpin_whatif_sensitivity`). `odoo_replenishment` and everything else that can write to a client's system of record is deliberately NOT exposed — traced and confirmed by an independent security review, not just asserted in a comment. Auth: new `src/mcp_keys.py::McpKeyStore` (SQLite, per-client high-entropy keys, hash-only at rest, issue/validate/revoke) + `webapp/mcp_auth.py` middleware — separate from the dashboard's single shared `LINCHPIN_API_KEY`. Rate limiting is **identity-aware** (keyed by resolved client name post-auth, not shared source IP — a real bug the security review caught and this session fixed before merge). Manual key issuance only: `python examples/issue_mcp_key.py issue "<client name>"`. Full reference: `docs/MCP_SERVER.md`.
+- **Formula-injection fix (NEW, PR #92, shipped):** the MCP security review incidentally surfaced a pre-existing CSV/Excel formula-injection gap (OWASP CSV injection) in the dashboard's regular deliverable exports — a `product_id` starting with `=`/`+`/`-`/`@` survived unescaped into generated `.xlsx`/`.csv` files, and openpyxl auto-promotes a leading `=` string to a live formula. Fixed: new `src/sanitize.py::defuse_formula()`, wired into every confirmed sink (`src/excel_export.py`, `jobs/deliverables.py`, `src/export.py::write_summary_csv()` — the last one is shared by ~28 `jobs/*_job.py` modules, so all of them are covered). **Two follow-ups from this fix are NOT started** — see §3.2.
+- **README.md / docs:** already refreshed this cycle (PR #87, #90) — 34-tool capability tables, book/author attribution removed, MIT license section removed from the README text (the actual `LICENSE` file at the repo root was intentionally left untouched — a separate decision the user hasn't made yet).
+- **Odoo connector:** unchanged — still needs validation against a REAL Odoo instance (user has none yet; don't treat as urgent unless they say otherwise).
 
 ---
 
 ## 3. Immediate next steps, in priority order
 
-### Not fixed — the only known HIGH-severity item left
+### 3.1 [explicitly requested by the user] Publish the MCP server on free directories
 
-1. **[in progress by another session, do not duplicate] Writeback idempotency check-then-act race.** Branch `fix/writeback-idempotency-race`, worktree `../.wt-idempotency-race` (relative to this repo's parent dir), latest commit `ee65bcc "fix(safety): close writeback idempotency check-then-act race"`, not yet PR'd as of this handoff. Check `git log`/`git status` in that worktree and `gh pr list --head fix/writeback-idempotency-race` before touching `src/writeback.py`, `src/writeback_store.py`, or `src/connectors/odoo.py`'s claim/release methods — if that session has stalled (no new commits, no PR, for a long time), it's fine to pick up where it left off rather than re-deriving from scratch: read its diff first (`git diff main` in that worktree).
+This is the cheapest, highest-leverage next move — no billing complexity, no
+new code, pure distribution. **But it has an unmet prerequisite: there is no
+public deployment yet.** Checked this session — no live production URL exists
+anywhere in the docs/config (`docs/DEPLOYMENT.md` is a checklist, not a
+deployed instance). The actual work here is two steps, not one:
 
-### Backlog — real but lower urgency (full detail in [[linchpin-audit-fixes-2026-07]] and the original audit transcript if still available)
+1. **Deploy the webapp somewhere with a real public URL and TLS**, following
+   `docs/DEPLOYMENT.md`'s existing checklist (`LINCHPIN_ENV=production`,
+   `LINCHPIN_RATE_LIMIT`, reverse proxy for TLS, etc.) — pick a host (Railway/
+   Fly.io/Render/a VPS — no existing preference recorded, this is an open
+   decision for whoever picks this up, possibly needs the user's input on
+   budget/preference). `--workers N` is supported (the orchestrator is
+   per-process; `McpKeyStore`/`SqliteAuditLedger` are both already
+   cross-process-safe via SQLite file locking).
+2. **Register with the official MCP registry**, then list/claim on the
+   directories researched this session (see [[linchpin-monetization-plan]] §5
+   for the real 2026 numbers): **Glama** (~37-51k servers indexed), **Smithery**
+   (~7k+, app-store UI, hosted remote servers), **PulseMCP** (~12-18k+,
+   hand-reviewed) — these are discovery storefronts that read off the official
+   registry and let an owner claim their listing; check each one's actual
+   current submission process before assuming it's identical across all three,
+   it wasn't independently verified step-by-step this session, only that they
+   exist and are free.
 
-- **Jobs layer:** `_pick_column`/column-sniffing boilerplate duplicated verbatim across ~19 `jobs/*_job.py` files (extract a shared helper); two coexisting deliverable-builder generations for inventory/pricing with a visible drift artifact; generic deck XLSX is unstyled/chartless (below the "client-grade" bar the project claims); deck `confidence` values are hardcoded constants in some tools, not computed.
-- **Webapp:** only `POST /api/jobs` is authenticated/rate-limited; other compute-doing endpoints (`/api/portfolio`, `/api/warehouse`, etc.) are not. `/console` prototype is unusable once the recommended production auth is on. No app-level body-size limit (proxy-only).
-- **Test suite:** CI coverage gate excludes the orchestrator/jobs/webapp layers (engine-only); `jobs/qa.py` (the QA gate itself) is the least-covered core module at 76%.
-- **Engine nits:** `DEA` silently emits NaN on LP solver failure instead of raising; an invalid Incoterm string is unreachable dead code in `landed_cost.py`; `AutoETS`'s default season length is `min(52, n_periods//2)` (arbitrary, should derive from frequency); Croston's error-stat initialization leaks a future value into pre-first-demand periods; the inverse-normal-loss polynomial (`fill_rate.py`) is unguarded below ~5e-4 targets.
-- **Docs:** `documentation/CAPABILITY_EXPANSION_PLAN.md`'s "Hoy" (today) coverage table is a snapshot frozen at 22 jun 2026 and was NOT re-certified this session (would require re-deriving the audit's original scoring methodology) — a dated note was added pointing at the registry instead of fabricating new percentages. `documentation/GRAPH_LESSONS.md` and other docs may have similarly drifted numbers — spot-check before trusting any specific number in prose that isn't the registry or the graph file itself.
+Zero cost either way, but don't report this as "done" until there's an actual
+live URL a directory (or a client) can hit — an unauthenticated `localhost`
+server obviously isn't listable.
 
-### Not code — the product/business gap (see [[linchpin-project]] for the live thread)
+### 3.2 Two follow-ups from the formula-injection fix (PR #92), not started
 
-The audit's product-value section (5/10) found: zero real-world validation (every case study runs on public sample data), the Odoo connector has never touched a real Odoo instance, and there's no commercial shell (accounts, persistence, multi-tenant). None of this is fixable by writing more engine code — it needs real pilot clients. This is exactly what the in-progress Upwork/Contra/Odoo-Apps-Store go-to-market conversation is for; see [[linchpin-project]] memory for where that stands. Don't let "the code isn't done" block starting outreach — per the audit's own read, the Inventory/Demand-Planner slice (~82%) is genuinely sellable today.
+1. `webapp/app.py`'s `/jobs-output` deliverable-download route
+   (`StaticFiles` mount) has **zero authentication of its own** — only
+   `POST /api/jobs` is gated. Today's "access control" is pure obscurity (a
+   `tempfile.mkdtemp` directory name), no expiry, no revocation. Not urgent
+   (not exploitable without already knowing/guessing a live job's temp dir
+   name) but a real gap on a surface that's about to get more traffic.
+2. `src/powerbi_export.py::build_powerbi_dataset()` has the **identical**
+   unfixed formula-injection vulnerability (raw `df.to_csv()` on
+   `product_id`) — same `defuse_formula()` fix pattern applies, just not
+   wired in yet. Only reachable from offline `examples/build_powerbi_dataset.py`
+   / `examples/run_complete.py` scripts today, not the live upload path, so
+   lower urgency than the sinks already fixed in PR #92.
+
+Both were spun off as `spawn_task` chips during the session that produced
+PR #92 — check whether either chip is still live/unstarted before
+re-deriving scope from scratch.
+
+### 3.3 The rest of the monetization ladder (see [[linchpin-monetization-plan]] for full detail)
+
+- **Phase B (trigger: >5 paying MCP clients, not before):** Stripe metered subscription billing, replacing manual key issuance.
+- **Phase C (trigger: real agent-to-agent payment demand shows up, not before):** x402/pay-per-call. Real but volatile market as of this research (volume down ~77% from a Nov 2025 peak) — don't build this speculatively.
+- **Odoo Apps Store packaging:** 5 proposed "agent" bundles regrouping the 34 tools by Odoo-fit (Demand & Inventory Planner flagship, Inventory Control, Procurement & Sourcing, Warehouse & Logistics, Finance & Pricing) + a non-Odoo "Strategy Suite". Corrected pricing after checking real comparables: **$99-299 one-time per Store listing** (NOT the $7-22k a naive hours-of-consulting calculation first produced — that mistake and the correction are recorded in memory, worth reading before quoting a client). Recurring revenue has to live on Linchpin's own webapp, not the Odoo Store (structurally one-time-sale only).
+- **GEO** (Generative Engine Optimization — get surfaced in ChatGPT/Claude/Perplexity's own answers) and an **own portfolio site** (0% commission vs. Upwork's 10%/Fiverr's 20%) — both zero-build-cost, positioning/content work, not code.
+- **Zero paying clients, zero real-Odoo validation today** — the audit's own read was that the Inventory/Demand-Planner slice (~82%) is genuinely sellable now; don't let more engine work substitute for actually finding the first client. A discounted/free founding-client pilot (in exchange for a case study) was the recommended way to get the first proof point before quoting full price.
+
+### 3.4 Lower-urgency engine/code backlog (unchanged, still real, still not urgent)
+
+Jobs-layer `_pick_column` duplication across ~19 files, two coexisting
+deliverable-builder generations for inventory/pricing, unstyled generic deck
+XLSX, only `POST /api/jobs` authenticated (besides the new `/mcp` gate — most
+other endpoints like `/api/portfolio`/`/api/warehouse` still aren't), a few
+engine nits (DEA NaN-on-failure, dead Incoterm branch, AutoETS season-length
+heuristic). None of this blocks revenue work; see prior HANDOFF revisions in
+git history for the full original list if it's ever needed.
 
 ---
 
-## 4. How to run (conventions)
+## 4. How to run (conventions, updated)
 
 - **Python 3.11+**, `.venv` is uv-managed (no pip): `uv pip install --python .venv/Scripts/python.exe <pkg>`.
-- **Tests:** `PYTHONPATH=. .venv/Scripts/python.exe -m pytest tests/ -q`. **Lint** (matches CI): `ruff check src tests examples`. ASCII-only in console prints (Windows cp1252 — em dashes break it; markdown files written utf-8 are fine).
-- **Workflow:** feature branch → draft PR → CI green (3.11/3.12/3.13) → squash-merge. Never push straight to `main`.
+- **Tests:** `PYTHONPATH=. .venv/Scripts/python.exe -m pytest tests/ -q`. **Lint** (matches CI): `ruff check src tests examples`. ASCII-only in console prints (Windows cp1252).
+- **⚠️ CI's real dependency source is `requirements-dev.txt`, NOT `pyproject.toml` extras directly.** `requirements-dev.txt` is a hand-maintained mirror (`pip install -r requirements-dev.txt`, comment says "canonical source is pyproject.toml" but CI never reads pyproject's extras itself). **If you add a new optional dependency to `pyproject.toml`, you MUST also add it to `requirements-dev.txt` or CI silently can't import your new code.** Bit this session (`mcp`, `pytest-asyncio` were added to `pyproject.toml`'s extras first, forgotten in `requirements-dev.txt`, caught only by manually building a throwaway venv from `requirements-dev.txt` and running the suite before opening the PR — do that verification step for any future new dependency).
+- **New: async tests.** `pytest-asyncio` is now a dependency (`asyncio_mode = "auto"` in `pyproject.toml`), needed for `tests/test_mcp_server.py`'s `async def test_*` functions (FastMCP's `list_tools()`/`call_tool()` are coroutines).
+- **Workflow:** feature branch → draft PR → CI green (3.11/3.12/3.13) → `gh pr ready` if opened as draft (a PR still marked draft fails to merge with "Pull Request is still a draft") → squash-merge. Never push straight to `main`.
 - **graphify:** `graphify update .` refreshes the **code** graph (AST-only, gitignored `graphify-out/`). The **books** graph lives in `knowledge/scm-books/` (committed, needs an LLM backend to rebuild).
-- **New agent-tool recipe** (unchanged, still the pattern): `jobs/<x>_job.py` with a pandas-only `prepare()` (reads its own CSV, not `intake.py`) → `run`/`verify`/`build_deck` → a `Tool` in `scm_agent/tools.py` with distinctive multi-word `intent_keywords` → an `options` builder in `scm_agent/tool_options.py` (a system-wide invariant test asserts every tool has one) → add its key to `tests/test_scm_agent.py::test_build_default_registry_tools`.
+- **New agent-tool recipe** (unchanged): `jobs/<x>_job.py` with a pandas-only `prepare()` → `run`/`verify`/`build_deck` → a `Tool` in `scm_agent/tools.py` → an `options` builder in `scm_agent/tool_options.py` → add its key to `tests/test_scm_agent.py::test_build_default_registry_tools`.
+- **New MCP-tool recipe:** add a job_type string literal + a thin `@mcp.tool`-decorated wrapper in `webapp/mcp_server.py`'s `build_mcp_server()`, following the existing 8 as templates — reuses the shared `_run_analysis_tool_sync` bridge, no new plumbing needed. Only ever add tools that are genuinely read-only/no-writeback; that boundary is the whole trust model of this surface.
 
 ---
 
 ## 5. Gotchas / warnings (read before committing)
 
-- **Worktree recipe that works reliably on this repo (Windows):** `git worktree add -b <branch> C:/Users/<you>/Music/scm/.wt-<x> origin/main` → edit/test with the **main repo's** `.venv/Scripts/python.exe`, cwd = worktree, `PYTHONPATH=<absolute worktree path>` (a *relative* `PYTHONPATH=.` silently breaks if your shell's cwd didn't actually follow you into the new worktree — always double check `pwd` after creating one) → commit → push → `gh pr create --draft` → wait for CI → `gh pr ready` (drafts can't be merged directly — `gh pr merge` on a draft errors with "Pull Request is still a draft") → `gh pr merge --squash --delete-branch`.
-- **`gh pr merge --delete-branch` reliably fails to delete the LOCAL branch** if a worktree still references it ("cannot delete branch ... used by worktree") — **the remote merge still succeeds regardless**; verify with `gh pr view N --json state,mergedAt`, don't assume failure. Clean up after: `git worktree remove --force <path>` (usually fine on this repo now; if it ever hits Windows `Permission denied`, fall back to PowerShell `Remove-Item -Recurse -Force`, then `git worktree prune`), then `git branch -D <branch>` + `git push origin --delete <branch>` manually since the aborted local delete also skips the remote delete.
-- **Multiple parallel branches editing the same file WILL conflict at merge time, even when the underlying code changes don't overlap.** This session ran 3 parallel worktrees; two of them both appended a new `### Fixed` section to `CHANGELOG.md`'s `[Unreleased]` block at the same insertion point, so the second PR to merge got a real (not fake) merge conflict. Fix was easy (`git merge origin/main`, git auto-merged everything except CHANGELOG.md, manually deduplicate the resulting triple `### Fixed` headers into one) but budget time for it when running parallel worktrees that all touch a shared file like CHANGELOG.md or a shared registry/routing file.
-- **No live parallel autonomous loop was detected in the jobs/intake layer as of 2026-07-02** (checked: `jobs/intake.py`, `src/batch.py`, `tests/test_batch.py`, `tests/test_jobs.py`). There IS a live parallel session in the writeback/odoo layer right now (see §3 item 1) — re-check `git worktree list` and `git status` in any sibling `.wt-*` directories yourself before assuming either way, since this changes session to session.
+- **Worktree recipe (Windows):** `git worktree add -b <branch> C:/Users/<you>/Music/scm/.wt-<x> origin/main` → edit/test with the **main repo's** `.venv/Scripts/python.exe`, cwd = worktree, absolute `PYTHONPATH` → commit → push → `gh pr create --draft` → CI green → `gh pr ready` → `gh pr merge --squash --delete-branch`.
+- **`gh pr merge --delete-branch` reliably fails to delete the LOCAL branch** if a worktree still references it — the remote merge still succeeds regardless; verify with `gh pr view N --json state,mergedAt`. Clean up after: `git worktree remove --force <path>`, `git branch -D <branch>`, `git push origin --delete <branch>` manually.
+- **Parallel worktrees editing the same shared file (esp. `CHANGELOG.md`'s `[Unreleased]` section) WILL produce a real merge conflict** even when the underlying code changes don't overlap at all — happened twice this session across unrelated branches. `git merge origin/main` + manually dedupe the resulting duplicate section headers.
+- **This repo runs genuinely concurrent Claude Code sessions.** Re-fetch and re-read `HANDOFF.md` right before finalizing any PR, not just at session start — main moves fast, and another session's work (a different worktree, a different branch) can land while you're mid-task. This session alone saw two other sessions' PRs land unprompted (#89 idempotency race, #92 formula injection via a spawned task) — neither caused a conflict, but both were only discovered by checking, not assumed.
+- **`spawn_task` chips the user starts run as fully separate sessions** — they show up as new worktrees (this session saw one under `.claude/worktrees/<name>`, a different convention than this repo's own `.wt-<x>` sibling-directory habit) and can merge to `main` without this session's direct involvement. Check `gh pr list`/`git log` for surprises before assuming a flagged follow-up is still unstarted.
 - **Never read or surface PII** — some datasets (e.g. DataCo) carry customer PII; analysis is aggregate-only.
-- **Don't paste secrets** into chat or commits. `LINCHPIN_APPROVAL_SECRET` (signs writeback approvals) joins `LINCHPIN_API_KEY` as a real secret — see `.env.example`/`SECURITY.md`.
-- `.env`, `data/`, `graphify-out/`, `deliverables/` are gitignored.
+- **Don't paste secrets** into chat or commits. `LINCHPIN_APPROVAL_SECRET`, `LINCHPIN_API_KEY`, and now `data/mcp_keys.sqlite3` (hashed keys, but still real client identities — gitignored, never commit) are all real secrets/sensitive state.
+- `.env`, `data/*.sqlite3`, `graphify-out/`, `deliverables/` are gitignored (the `data/*.sqlite3` entry is new this session — it was a real gap before: `CLAUDE.md` claimed all of `data/` was gitignored, only `data/kaggle/` actually was).
 
 ---
 
 ## 6. Key files (updated)
 
-- Writeback safety: `src/writeback.py` (`AuditBookkeeping`, `Approval` w/ HMAC signature, `ABSENT` sentinel), `src/writeback_store.py` (`SqliteAuditLedger`).
-- Odoo connector: `src/connectors/odoo.py` (`OdooClient` w/ timeout+retry, `_ReorderRuleStore`, `_DraftPoStore` — **both now have partial-failure compensation in `commit()`, via shared `_apply_restore`/`_unlink_all` helpers, PR #86**), `jobs/odoo_job.py`.
-- Agent routing/grounding: `scm_agent/registry.py` (`_keyword_matches`, word-boundary + plural tolerance), `scm_agent/intent.py` (LLM-failure fallback), `scm_agent/knowledge.py` (IDF-weighted `ground_citations`, domain-gated `advise`).
-- Engine math (fixed in earlier session): `src/eoq.py` (`compute_eoq_volume_discount`), `src/multi_echelon.py` (`simulate_serial_gsm`), `src/newsvendor.py` (both optimizers), `src/pricing.py` + `jobs/pricing.py` (`confident` logic).
-- Engine test coverage: `src/safety_stock.py` / `tests/test_safety_stock.py` — **now has an exact-signed-value regression test anchored to Vandeput Table 4.1, PR #85**.
+- **MCP server (new):** `webapp/mcp_server.py` (the 8 tools + shared bridge), `webapp/mcp_auth.py` (identity-aware auth+rate-limit middleware), `src/mcp_keys.py` (`McpKeyStore`), `examples/issue_mcp_key.py` (operator CLI), `docs/MCP_SERVER.md` (full reference).
+- **Security fix (new):** `src/sanitize.py` (`defuse_formula()`), wired into `src/excel_export.py`, `jobs/deliverables.py`, `src/export.py`.
+- Writeback safety: `src/writeback.py`, `src/writeback_store.py` (`SqliteAuditLedger`, now with atomic `claim()`/`release()` for the idempotency race fix, PR #89).
+- Odoo connector: `src/connectors/odoo.py` (`_ReorderRuleStore`, `_DraftPoStore` — partial-failure compensation + idempotency claiming, both now fixed).
+- Agent routing/grounding: `scm_agent/registry.py`, `scm_agent/intent.py`, `scm_agent/knowledge.py`.
 - Agent: `scm_agent/{orchestrator,registry,intent,knowledge,modes,tools,tool_options,guided_bridge,llm,types}.py`
 - Deliverable: `src/deliverable.py`, `jobs/deliverables.py`, `jobs/*_deliverable.py`
-- Engines: `src/*.py` (34 tools' worth — run `ls src/` or `build_default_registry()`, don't trust a static list in any doc, including this one)
+- Engines: `src/*.py` (34 tools' worth — run `build_default_registry()`, don't trust a static list)
 - Knowledge: `knowledge/scm-books/` (L3 books graph, committed, 24 sources), `graphify-out/` (code graph, gitignored)
-- Tests: `tests/test_*.py` (1131 passing) · Plan: `documentation/CAPABILITY_EXPANSION_PLAN.md` (has a dated staleness note in its "Hoy" table, see §3)
-- Top-level docs: `README.md`, `scm_agent/README.md` — **both rewritten this session (PR #87) to list all 34 tools by area instead of the old 3-4-capability framing.**
+- Tests: `tests/test_*.py` (1198 passing, includes new `test_mcp_*.py` files)
+- Top-level docs: `README.md`, `scm_agent/README.md`, `docs/MCP_SERVER.md`, `docs/DEPLOYMENT.md`
