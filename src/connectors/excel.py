@@ -27,10 +27,18 @@ Safety properties beyond the shared plane:
 - ATOMIC WRITE: saved to a temp file then ``os.replace``-d, so a crash or a
   locked file can never leave a half-written workbook.
 - FILE BACKUP: every commit first copies the original next to it
-  (``<name>.<key>.linchpin-backup<ext>``) — disaster recovery for anything a
-  cell-level rollback can't cover (openpyxl round-trips values/formulas/styles,
-  but exotic content like charts can degrade; the backup preserves the byte-exact
-  original).
+  (``<name>.<key>-<contenthash>.linchpin-backup<ext>``) — disaster recovery for
+  anything a cell-level rollback can't cover (openpyxl round-trips
+  values/formulas/styles, but exotic content like charts can degrade; the backup
+  preserves the byte-exact original).
+- CRASH-WINDOW TRIPWIRE: if the process dies between the file replace and the
+  audit record, the write is live but unaudited — and a naive retry would
+  re-stage from the mutated file and record a poisoned restore (rollback would
+  then "restore" the new value). The backup left orphaned by the crashed attempt
+  is the detector: a commit that finds an existing backup for the same key with
+  a DIFFERENT content hash refuses (writing nothing) and directs the operator to
+  reconcile from that backup first. In that window the backup — not
+  ``rollback()`` — is the authoritative copy of the original.
 - ``.xlsm`` macros are PRESERVED (``keep_vba``), never executed — running client
   macros needs live Excel (COM) and is out of scope for a file-level connector.
 """
@@ -60,8 +68,14 @@ class ExcelWritebackError(Exception):
 
 
 def _safe_key(idempotency_key: str) -> str:
-    cleaned = _KEY_SAFE_RE.sub("-", idempotency_key).strip("-")[:40]
-    return cleaned or hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()[:12]
+    """Filesystem-safe, EXACT-key-unique tag for backup filenames.
+
+    The readable part is sanitized (and may collide: "rop 1" vs "rop-1"); the
+    appended hash of the full original key makes the tag unique per exact key, so
+    the crash-window tripwire can never fire across two different keys.
+    """
+    cleaned = _KEY_SAFE_RE.sub("-", idempotency_key).strip("-")[:40] or "key"
+    return f"{cleaned}-{hashlib.sha256(idempotency_key.encode('utf-8')).hexdigest()[:8]}"
 
 
 class ExcelWorkbookStore:
@@ -160,10 +174,20 @@ class ExcelWorkbookStore:
         # content_hash suffix disambiguates two changesets whose keys sanitize to
         # the same _safe_key (e.g. "rop 1" vs "rop-1") — neither overwrites the
         # other's backup.
-        backup = self._backup_dir / (
-            f"{self._path.stem}.{_safe_key(changeset.idempotency_key)}"
-            f"-{changeset.content_hash[:8]}.linchpin-backup{self._path.suffix}"
-        )
+        backup = self._backup_dir / self._backup_name(changeset.idempotency_key, changeset.content_hash)
+
+        # Crash-window tripwire: a backup for this key with a DIFFERENT content
+        # hash means an earlier attempt backed up and possibly wrote the file but
+        # never recorded its audit (process died in that window). Committing now
+        # would bake the mutated file in as "original" and poison rollback — the
+        # orphaned backup holds the true original, so reconciliation comes first.
+        stale = [p for p in self._backups_for_key(changeset.idempotency_key) if p.name != backup.name]
+        if stale:
+            raise ExcelWritebackError(
+                f"an earlier apply attempt for key {changeset.idempotency_key!r} left a backup but "
+                f"no audit record — its write may already be live in {self._path.name}. Reconcile "
+                f"against {stale[0].name} (the pre-attempt original), then delete that backup to retry"
+            )
         self._backup_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy2(self._path, backup)
 
@@ -194,6 +218,31 @@ class ExcelWorkbookStore:
             wb[entity_id][field] = None if original is writeback.ABSENT else original
         self._atomic_save(wb)
         self._audit.forget(idempotency_key)
+        # The backup is redundant once the file is restored — and leaving it would
+        # false-trigger the crash-window tripwire on a legitimate reuse of this key.
+        for p in self._backups_for_key(idempotency_key):
+            p.unlink(missing_ok=True)
+
+    def _backup_name(self, idempotency_key: str, content_hash: str) -> str:
+        return (
+            f"{self._path.stem}.{_safe_key(idempotency_key)}"
+            f"-{content_hash[:8]}.linchpin-backup{self._path.suffix}"
+        )
+
+    def _backups_for_key(self, idempotency_key: str) -> list[Path]:
+        """Existing backups for this key (any content hash), by exact name shape.
+
+        Manual prefix/suffix matching, not ``glob`` — a client filename may contain
+        glob metacharacters (``[]``), which would corrupt a pattern silently.
+        """
+        if not self._backup_dir.exists():
+            return []
+        prefix = f"{self._path.stem}.{_safe_key(idempotency_key)}-"
+        suffix = f".linchpin-backup{self._path.suffix}"
+        return sorted(
+            p for p in self._backup_dir.iterdir()
+            if p.name.startswith(prefix) and p.name.endswith(suffix)
+        )
 
     # ---- semantic staging helper -----------------------------------------------------
 

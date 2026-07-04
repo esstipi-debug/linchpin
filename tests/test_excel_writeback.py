@@ -239,3 +239,51 @@ def test_colliding_sanitized_keys_get_distinct_backups(planilla):
     _approved_apply(store, _stage(store, {"D5": 90}, key="rop 1"))
     _approved_apply(store, _stage(store, {"D4": 60}, key="rop-1"))
     assert len(list(planilla.parent.glob("*.linchpin-backup*"))) == 2
+
+
+# ---- crash window between file write and audit record (stale-backup tripwire) ------
+
+def test_crash_between_save_and_audit_is_caught_on_retry(planilla, monkeypatch):
+    # If the process dies AFTER os.replace but BEFORE the audit record, the write
+    # is live but unaudited. A naive retry re-stages from the mutated file, bakes
+    # the new value in as `before`, and would record a poisoned restore (rollback
+    # then "restores" to the new value). The orphaned backup left by the crashed
+    # attempt must act as a tripwire: commit refuses until the operator reconciles.
+    store = ExcelWorkbookStore(planilla)
+    cs = _stage(store, {"D5": 90}, key="crashy")
+    monkeypatch.setattr(writeback.AuditBookkeeping, "record",
+                        lambda self, entry: (_ for _ in ()).throw(RuntimeError("boom")))
+    with pytest.raises(RuntimeError):
+        writeback.apply(store, cs, approval=writeback.approve(cs, "operator"))
+    monkeypatch.undo()
+
+    assert load_workbook(planilla)[SHEET]["D5"].value == 90  # write landed, unaudited
+    cs2 = _stage(store, {"D5": 95}, key="crashy")  # different content -> different hash
+    with pytest.raises(ExcelWritebackError, match="earlier apply attempt"):
+        writeback.apply(store, cs2, approval=writeback.approve(cs2, "operator"))
+    assert load_workbook(planilla)[SHEET]["D5"].value == 90  # tripwire wrote nothing
+
+
+def test_same_key_same_content_retry_proceeds_after_backup_only_crash(planilla):
+    # A hard kill between the backup copy and the file write leaves a backup whose
+    # content-hash suffix MATCHES the retried changeset (file unchanged, so the
+    # re-stage produces the identical changeset) - that retry must proceed.
+    import shutil
+
+    store = ExcelWorkbookStore(planilla)
+    cs = _stage(store, {"D5": 90}, key="pre-save-crash")
+    orphan = planilla.parent / store._backup_name("pre-save-crash", cs.content_hash)
+    shutil.copy2(planilla, orphan)
+    assert _approved_apply(store, cs).applied
+
+
+def test_rollback_removes_backups_enabling_clean_key_reuse(planilla):
+    # After a successful rollback the backup is redundant (file restored) - keeping
+    # it would false-trigger the tripwire on a legitimate reuse of the same key.
+    store = ExcelWorkbookStore(planilla)
+    cs = _stage(store, {"D5": 90}, key="reuse-me")
+    _approved_apply(store, cs)
+    store.rollback("reuse-me")
+    assert not list(planilla.parent.glob("*.linchpin-backup*"))
+    cs2 = _stage(store, {"D5": 91}, key="reuse-me")
+    assert _approved_apply(store, cs2).applied
