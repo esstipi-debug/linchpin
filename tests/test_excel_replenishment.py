@@ -130,7 +130,12 @@ def test_run_stages_changeset_with_new_order_column(planilla):
     # New column E: header at the header row + one qty per restocked SKU.
     assert edits["E3"] == "Pedir (Linchpin)"
     assert edits["E4"] == 58.0 and edits["E6"] == 42.0
-    assert all(c.before is None for c in cs.changes)  # dry-run: nothing written yet
+    # Order-column cells are fresh writes (before None); the plan's INPUT cells
+    # travel as no-op GUARDS (before == after) so input drift is caught at apply.
+    by_field = {c.field: c for c in cs.changes}
+    assert by_field["E4"].before is None
+    assert by_field["C4"].before == 42 and by_field["C4"].after == 42   # stock guard
+    assert by_field["D4"].before == 50 and by_field["D4"].after == 50   # ROP guard
     assert load_workbook(planilla)[SHEET]["E4"].value is None  # file untouched
 
 
@@ -200,8 +205,137 @@ def test_verify_flags_empty_planilla(tmp_path):
     ws.append(["Codigo", "Stock", "Punto Reorden"])
     f = tmp_path / "empty.xlsx"
     wb.save(f)
-    with pytest.raises(ValueError, match="no SKU rows"):
+    with pytest.raises(ValueError, match="no usable SKU rows"):
         job.prepare(str(f), {})
+
+
+# ---- adversarial-review regressions ------------------------------------------------
+
+def test_blank_rop_row_is_excluded_not_zeroed(tmp_path):
+    # A blank ROP must never coalesce to 0: with negative stock that would place a
+    # spurious order, and with positive stock it silently never replenishes.
+    wb = Workbook()
+    ws = wb.active
+    ws.title = SHEET
+    ws.append(["Codigo", "Stock", "Punto Reorden"])
+    ws.append(["SKU-OK", 8, 25])
+    ws.append(["SKU-BLANK", -5, None])
+    f = tmp_path / "blank_rop.xlsx"
+    wb.save(f)
+    report = job.run(job.prepare(str(f), {}))
+    assert report.restock == {"SKU-OK": 42.0}      # no spurious order for SKU-BLANK
+    assert report.n_unplanned == 1
+    assert "NOT planned" in report.summary          # surfaced, never silent
+
+
+def test_duplicate_skus_fail_closed(tmp_path):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = SHEET
+    ws.append(["Codigo", "Stock", "Punto Reorden"])
+    ws.append(["SKU-001", 8, 25])
+    ws.append(["SKU-001", 3, 25])
+    f = tmp_path / "dup.xlsx"
+    wb.save(f)
+    with pytest.raises(ValueError, match="duplicate SKU"):
+        job.prepare(str(f), {})
+
+
+def test_all_formula_stock_gives_actionable_error(tmp_path):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = SHEET
+    ws.append(["Codigo", "Stock", "Punto Reorden"])
+    ws.append(["SKU-001", "=Z1+Z2", 25])  # formula with no cached value
+    f = tmp_path / "formulas.xlsx"
+    wb.save(f)
+    with pytest.raises(ValueError, match="formula"):
+        job.prepare(str(f), {})
+
+
+def test_corrupt_xlsx_raises_value_error_not_library_internals(tmp_path):
+    f = tmp_path / "fake.xlsx"
+    f.write_bytes(b"this is not a zip archive at all")
+    with pytest.raises(ValueError, match="could not open"):
+        job.prepare(str(f), {})
+
+
+def test_column_binding_is_priority_ordered_not_hash_ordered(tmp_path):
+    # Two stock-candidate labels in the same header row: "stock" outranks
+    # "existencias" in the priority tuple, deterministically.
+    wb = Workbook()
+    ws = wb.active
+    ws.title = SHEET
+    ws.append(["Codigo", "Existencias", "Stock", "Punto Reorden"])
+    ws.append(["SKU-001", 999, 8, 25])
+    f = tmp_path / "two_labels.xlsx"
+    wb.save(f)
+    payload = job.prepare(str(f), {})
+    assert payload["rows"][0].on_hand == 8  # bound to "Stock", not "Existencias"
+
+
+def test_sheet_scan_skips_leading_catalog_sheet(tmp_path):
+    # A first sheet with a SKU column but no stock must not block a later sheet
+    # that fully qualifies.
+    wb = Workbook()
+    catalog = wb.active
+    catalog.title = "Catalogo"
+    catalog.append(["Codigo", "Precio"])
+    catalog.append(["SKU-001", 9.99])
+    inv = wb.create_sheet(SHEET)
+    inv.append(["Codigo", "Stock", "Punto Reorden"])
+    inv.append(["SKU-001", 8, 25])
+    f = tmp_path / "multi.xlsx"
+    wb.save(f)
+    payload = job.prepare(str(f), {})
+    assert payload["sheet"] == SHEET
+
+
+def test_idempotency_key_is_content_derived_and_stable(planilla):
+    r1 = job.run(job.prepare(str(planilla), {}))
+    r2 = job.run(job.prepare(str(planilla), {}))
+    assert r1.changeset.idempotency_key == r2.changeset.idempotency_key  # same plan
+    r3 = job.run(job.prepare(str(planilla), {}), order_up_to_factor=3.0)
+    assert r3.changeset.idempotency_key != r1.changeset.idempotency_key  # new plan
+
+
+def test_second_week_apply_does_not_collide_with_first(planilla):
+    # Week 1: plan + apply. Week 2: stock moved, a NEW plan must apply cleanly
+    # (no idempotent skip, no crash-window tripwire false positive).
+    p1 = job.prepare(str(planilla), {})
+    r1 = job.run(p1)
+    writeback.apply(p1["store"], r1.changeset, approval=writeback.approve(r1.changeset, "op"))
+    wb = load_workbook(planilla)
+    wb[SHEET]["C4"] = 20  # week passes; stock drops further
+    wb.save(planilla)
+    p2 = job.prepare(str(planilla), {})
+    r2 = job.run(p2)
+    assert r2.changeset.idempotency_key != r1.changeset.idempotency_key
+    result = writeback.apply(p2["store"], r2.changeset, approval=writeback.approve(r2.changeset, "op"))
+    assert result.applied and not result.idempotent_skip
+    assert load_workbook(planilla)[SHEET]["E4"].value == 80.0  # 2*50 - 20
+
+
+def test_input_drift_between_stage_and_apply_is_refused(planilla):
+    from src.connectors.excel import ExcelWritebackError
+
+    payload = job.prepare(str(planilla), {})
+    report = job.run(payload)
+    wb = load_workbook(planilla)
+    wb[SHEET]["C4"] = 49  # stock changed AFTER staging -> the plan's qty is stale
+    wb.save(planilla)
+    with pytest.raises(ExcelWritebackError, match="changed since staging"):
+        writeback.apply(payload["store"], report.changeset,
+                        approval=writeback.approve(report.changeset, "op"))
+    assert load_workbook(planilla)[SHEET]["E4"].value is None  # nothing written
+
+
+def test_apply_howto_deliverable_written_when_staged(planilla, tmp_path):
+    report = job.run(job.prepare(str(planilla), {}))
+    written = job.write_operational(report, tmp_path / "out", "Acme")
+    howto = written["apply_howto"].read_text(encoding="utf-8")
+    assert report.changeset.idempotency_key in howto
+    assert "writeback.approve" in howto
 
 
 def test_write_operational_emits_csv(planilla, tmp_path):

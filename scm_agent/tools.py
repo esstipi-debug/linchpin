@@ -1297,12 +1297,18 @@ def excel_replenishment_tool() -> Tool:
                     "reversible dry-run through the Excel safe-staging connector - approved by a "
                     "human before anything is written.",
         intent_keywords=(
-            # Multi-word on purpose: bare "excel" would collide with every tool that
-            # accepts an Excel upload. "planilla" is the distinctive Spanish anchor.
+            # Multi-word AND action-anchored on purpose: bare "excel"/"planilla" would
+            # hijack briefs that merely mention a spreadsheet while asking for another
+            # capability (classification, layout, pricing...). Spanish phrases carry
+            # both accented and unaccented spellings - the matcher does not fold accents.
             "excel replenishment", "replenish my excel", "update my excel",
-            "write back to excel", "excel writeback", "planilla", "mi planilla",
-            "reponer planilla", "actualizar planilla", "spreadsheet replenishment",
-            "update the spreadsheet", "replenish spreadsheet", "hoja de calculo",
+            "write back to excel", "excel writeback",
+            "reponer planilla", "reponer mi planilla", "repone mi planilla",
+            "reposicion de mi planilla", "reposición de mi planilla",
+            "actualiza la reposicion", "actualiza la reposición",
+            "actualizar planilla", "actualiza mi planilla",
+            "spreadsheet replenishment", "update the spreadsheet",
+            "replenish spreadsheet", "replenish my spreadsheet",
         ),
         requires_data=True,
         options=lambda report: report.outcome,
