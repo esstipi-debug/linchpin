@@ -1,9 +1,9 @@
 """Linchpin's read-only MCP server (Phase A go-to-market — see linchpin-monetization-plan).
 
-Exposes 8 of the 34 registered agent tools to remote MCP clients (other AI
-agents, via Streamable HTTP): analysis only, no writeback. `odoo_replenishment`
-and every other tool that mutates a client's system of record is deliberately
-NOT exposed here — that stays for direct clients only, gated by the audited
+Exposes 8 of the 35 registered agent tools to remote MCP clients (other AI
+agents, via Streamable HTTP): analysis only, no writeback. `odoo_replenishment`,
+`excel_replenishment`, and every other tool that mutates a client's system of
+record is deliberately NOT exposed here — that stays for direct clients only, gated by the audited
 writeback safety plane (`src/writeback.py`), not by anything in this file.
 
 Bridge design: an MCP tool call carries data inline (JSON rows), but every
