@@ -51,6 +51,11 @@ data/*.sqlite3
 # back it up separately (see CLAUDE.md gotchas).
 clients/
 
+# Excel writeback artifacts: per-commit byte-exact backups of client files and the
+# monitor's run snapshots - real client inventory data, never versioned.
+*.linchpin-backup*
+.linchpin-monitor/
+
 # Misc — version the shared hook + settings, ignore personal/local overrides
 .claude/*
 !.claude/settings.json
