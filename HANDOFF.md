@@ -1,9 +1,51 @@
 # Linchpin — Session Handoff
 
-**Date:** 2026-07-03 · **Repo:** `esstipi-debug/linchpin` (now **private**) · **Branch:** `main` @ `26d7dc8` (PRs up to **#104**)
+**Date:** 2026-07-06 · **Repo:** `esstipi-debug/linchpin` (private) · **Branch:** `main` @ `4eaa018` (PRs up to **#114**)
 **Purpose:** pick up Linchpin work in a fresh session without re-deriving context.
 
-**Same-day update, after the MCP fix below:** the Odoo Store module
+**2026-07-06 — the monetization brief landed AND its first 3 commercial packages are now executable (PR #113 + PR #114).**
+PR #113 (`4eaa018`) merged `documentation/MONETIZATION_BRIEF.md`: a deep-research
+report (~50 search agents + 3-vote adversarial verification) concluding the
+fastest defensible path to >= USD 8,000/month for a solo operator is the
+**productized/fractional inventory service**, not SaaS self-serve or the MCP
+server. It also settled, via a 3-judge panel (fixed tiers 40.3/50 vs. a
+consulting-ladder 37.7 vs. a la carte 32.3), the **"Estructura de empaquetado
+comercial"**: 7 fixed-scope sections sold separately, no section ever sells a
+single tool — Diagnostico de Arranque ($1.5-2.5k unico) -> Starter ($2k/mo) ->
+Growth ($4k/mo+QBR) -> Scale ($7.5k/mo) -> Retainer Ejecutivo ($9-12k/mo), plus
+2 one-off projects (network/warehouse, sourcing/landed-cost). Shortest path to
+$8k/mo: **2 Growth clients**. See [[linchpin-monetization-plan]] for the full
+plan and [[linchpin-project]] for the underlying product.
+
+PR #114 (`df0f835`, same day) turned the **first 3 sections** (Diagnostico,
+Starter, Growth — the other 4 deferred on purpose) from a price table into
+runnable deliverables: `scm_agent/packages.py` (a two-phase package runner that
+reuses each registered `Tool`'s existing `prepare/run/qa/deliver` callbacks —
+no job logic duplicated) + `scm_agent/package_specs.py` (the 3 specs: 4/8/26
+tools respectively) + `jobs/package_deliverable.py` (consolidated deck) +
+`examples/run_package.py` (`--demo` runs Growth's 26/26 tools end-to-end in
+~12s; `--checklist` prints the exact client intake checklist per package) +
+Spanish sales one-pagers in `documentation/paquetes/` + runbook RB-9. The
+per-tool "QA fails => no deliverable" guarantee now holds at PACKAGE level
+structurally: phase 1 computes every step's prepare/run/qa with zero writes;
+phase 2 writes the per-tool deliverables + the consolidated deck only if every
+EXECUTED step (required or optional) passed QA — one failing step means zero
+files written, full stop. A derive-step gotcha worth knowing: `cycle_count`
+cannot take the raw sales CSV directly (its value-derivation dict comprehension
+overwrites duplicate SKU rows instead of summing them), so the package derives
+its input from the already-computed `abc_xyz` classification instead — the
+client only ever sends one sales file. 17 new tests, full suite green (1359
+passed), ruff clean. Also fixed in the same effort: the brief said "34 tools
+del catalogo completo" but the registry (and this doc's own tool count) has
+**35** — the brief's own arithmetic (26 Growth + 9 Scale-only) already implied
+35; corrected on the PR #113 branch before merging.
+
+**Not done, on purpose:** the other 4 sections (Scale, Retainer Ejecutivo, the
+2 one-off projects) have no runner/one-pager yet — explicitly deferred by the
+user to a later session. The 5 GTM directory/store listings from
+`GTM_SUBMISSIONS.md` are still pure operator-login actions, unchanged.
+
+**Same-day update (2026-07-03), after the MCP fix below:** the Odoo Store module
 (`odoo_addon/linchpin_dry_run/`) shipped (PR #103) - built, adversarially
 reviewed (6 real findings fixed: SSRF, error-leak, TransientModel data loss,
 overbroad access group, inaccurate data-sent disclosure, documented plaintext
