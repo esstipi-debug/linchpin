@@ -12,7 +12,9 @@ one consolidated deck + every tool's own deliverable.
     python examples/run_package.py --package growth --demo
 
 Packages (scope/price: documentation/MONETIZATION_BRIEF.md + documentation/paquetes/):
-diagnostico (4 tools, sprint) | starter (8 tools, mensual) | growth (26 tools, mensual+QBR).
+diagnostico (4 tools, sprint) | starter (8 tools, mensual) | growth (26 tools, mensual+QBR) |
+scale (35 tools, quincenal+S&OP mensual) | retainer_ejecutivo (same 35, distinta cadencia) |
+proyecto_red_almacen (6 tools, proyecto unico) | proyecto_sourcing (3 tools, proyecto unico).
 """
 
 from __future__ import annotations
@@ -299,6 +301,93 @@ def _demo_unidades() -> pd.DataFrame:
     ])
 
 
+def _demo_ubicaciones() -> pd.DataFrame:
+    return pd.DataFrame([
+        {"name": "Tienda Norte", "x": 10.0, "y": 10.0, "weight": 120},
+        {"name": "Tienda Este", "x": 70.0, "y": 15.0, "weight": 90},
+        {"name": "Tienda Centro", "x": 45.0, "y": 60.0, "weight": 150},
+        {"name": "Tienda Oeste", "x": 20.0, "y": 50.0, "weight": 80},
+        {"name": "Tienda Sur", "x": 65.0, "y": 55.0, "weight": 110},
+    ])
+
+
+def _demo_envios(rng: np.random.Generator) -> pd.DataFrame:
+    lanes = [
+        ("Local", 12.0, 90.0), ("Local", 25.0, 110.0),
+        ("Regional", 350.0, 220.0), ("Regional", 480.0, 260.0),
+        ("Nacional", 8_500.0, 480.0), ("Nacional", 9_200.0, 520.0),
+        ("Larga Distancia", 14_000.0, 1_900.0), ("Larga Distancia", 16_500.0, 2_100.0),
+    ]
+    rows = []
+    for n, (lane, weight, distance) in enumerate(lanes):
+        rows.append({
+            "shipment_id": f"ENV-{n:03d}", "lane": lane,
+            "weight_kg": round(weight * float(rng.uniform(0.9, 1.1)), 1),
+            "distance_km": round(distance * float(rng.uniform(0.9, 1.1)), 1),
+            "units": int(rng.integers(1, 40)),
+            "order_value": round(weight * float(rng.uniform(2.0, 4.0)), 2),
+        })
+    return pd.DataFrame(rows)
+
+
+def _demo_lineas_pedido(rng: np.random.Generator) -> pd.DataFrame:
+    catalog = ["SLT-01", "SLT-02", "SLT-03", "SLT-04", "SLT-05", "SLT-06"]
+    volumes = {sku: float(rng.uniform(0.01, 0.08)) for sku in catalog}
+    rows = []
+    for order_n in range(40):
+        order_id = f"PED-{order_n:04d}"
+        # SLT-01/SLT-02 co-occur often (affinity bait); the rest ride along randomly.
+        # A list (not a set) so row order is reproducible across processes - a
+        # set's iteration order depends on PYTHONHASHSEED, which is randomized
+        # per interpreter by default even with a fixed numpy rng seed.
+        basket: list[str] = ["SLT-01", "SLT-02"] if rng.random() < 0.6 else []
+        target_size = int(rng.integers(1, 4))  # rolled ONCE per order, not re-rolled per pick
+        while len(basket) < target_size:
+            sku = catalog[int(rng.integers(0, len(catalog)))]
+            if sku not in basket:
+                basket.append(sku)
+        for sku in basket:
+            rows.append({"order_id": order_id, "product_id": sku, "unit_volume": volumes[sku]})
+    return pd.DataFrame(rows)
+
+
+def _demo_estaciones() -> pd.DataFrame:
+    return pd.DataFrame([
+        {"station": "caja_recepcion", "arrival_rate": 8.0, "service_rate": 3.0,
+         "wait_cost": 12.0, "server_cost": 18.0},
+        {"station": "mesa_ayuda", "arrival_rate": 4.0, "service_rate": 2.5,
+         "wait_cost": 9.0, "server_cost": 15.0},
+        {"station": "call_center", "arrival_rate": 20.0, "service_rate": 5.0,
+         "wait_cost": 15.0, "server_cost": 20.0},
+    ])
+
+
+def _demo_trabajos() -> pd.DataFrame:
+    return pd.DataFrame([
+        {"job": "OP-101", "processing_time": 4.0, "due_date": 10.0},
+        {"job": "OP-102", "processing_time": 2.0, "due_date": 6.0},
+        {"job": "OP-103", "processing_time": 6.0, "due_date": 20.0},
+        {"job": "OP-104", "processing_time": 1.0, "due_date": 4.0},
+        {"job": "OP-105", "processing_time": 3.0, "due_date": 14.0},
+    ])
+
+
+def _demo_valor_ganado() -> pd.DataFrame:
+    return pd.DataFrame([
+        {"task": "Ingenieria", "planned": 100_000, "earned": 90_000, "actual": 95_000},
+        {"task": "Instalacion", "planned": 50_000, "earned": 55_000, "actual": 48_000},
+        {"task": "Pruebas", "planned": 30_000, "earned": 15_000, "actual": 25_000},
+        {"task": "Puesta en marcha", "planned": 20_000, "earned": 20_000, "actual": 21_000},
+    ])
+
+
+def _demo_liderazgo() -> pd.DataFrame:
+    # CHAIN model (Palamariu & Alicke): Comunicacion, Humildad, Adaptabilidad,
+    # Integracion, Nutricion del talento - each 0-4. Relevar con el cliente,
+    # nunca mandarle este CSV a llenar solo.
+    return pd.DataFrame([{"C": 3, "H": 2, "A": 3, "I": 1, "N": 2}])
+
+
 def build_demo_intake(intake_dir: str | Path) -> Path:
     """Write the full synthetic intake (every slot of every package) and return the dir."""
     intake = Path(intake_dir)
@@ -325,6 +414,13 @@ def build_demo_intake(intake_dir: str | Path) -> Path:
     _demo_devoluciones().to_csv(intake / "devoluciones.csv", index=False)
     _demo_riesgos().to_csv(intake / "riesgos.csv", index=False)
     _demo_unidades().to_csv(intake / "unidades_dea.csv", index=False)
+    _demo_ubicaciones().to_csv(intake / "ubicaciones.csv", index=False)
+    _demo_envios(rng).to_csv(intake / "envios.csv", index=False)
+    _demo_lineas_pedido(rng).to_csv(intake / "lineas_pedido.csv", index=False)
+    _demo_estaciones().to_csv(intake / "estaciones.csv", index=False)
+    _demo_trabajos().to_csv(intake / "trabajos.csv", index=False)
+    _demo_valor_ganado().to_csv(intake / "valor_ganado.csv", index=False)
+    _demo_liderazgo().to_csv(intake / "liderazgo.csv", index=False)
     return intake
 
 

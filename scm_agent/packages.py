@@ -77,6 +77,12 @@ class PackageStep:
     fallback_note: str = ""
     # Returns "" to run, or a human skip-reason (e.g. no Odoo credentials).
     gate: Callable[[dict], str] | None = None
+    # For tools whose real input is a PARAMETER, not a CSV column (e.g.
+    # leadership_chain takes params["scores"], not a data_path): given the
+    # resolved input file, returns the params overrides to merge in before
+    # calling tool.prepare. None => the file is passed through as data_path,
+    # unchanged, the normal way.
+    params_from_input: Callable[[Path], dict] | None = None
 
 
 @dataclass(frozen=True)
@@ -313,6 +319,12 @@ def _run_step(
         return StepOutcome(**base, status=STATUS_ERROR, source="derivado",
                            messages=(str(exc),))
     base["source"] = source
+
+    if step.params_from_input is not None and data_path is not None:
+        try:
+            params = {**params, **step.params_from_input(Path(data_path))}
+        except Exception as exc:
+            return StepOutcome(**base, status=STATUS_ERROR, messages=(str(exc),))
 
     if strict_params and tool.required_client_params:
         missing = [k for k in tool.required_client_params if k not in params]

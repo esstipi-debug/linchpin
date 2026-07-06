@@ -1,5 +1,6 @@
-"""Commercial packages: spec integrity, the package-level QA gate, and the three
-end-to-end demo runs (diagnostico / starter / growth)."""
+"""Commercial packages: spec integrity, the package-level QA gate, and end-to-end
+demo runs for all seven packages (diagnostico / starter / growth / scale /
+retainer_ejecutivo / proyecto_red_almacen / proyecto_sourcing)."""
 
 from __future__ import annotations
 
@@ -9,7 +10,17 @@ from pathlib import Path
 import pytest
 
 from examples.run_package import DEMO_PARAMS, build_demo_intake
-from scm_agent.package_specs import DIAGNOSTICO, GROWTH, PACKAGES, STARTER, get_package
+from scm_agent.package_specs import (
+    DIAGNOSTICO,
+    GROWTH,
+    PACKAGES,
+    PROYECTO_RED_ALMACEN,
+    PROYECTO_SOURCING,
+    RETAINER_EJECUTIVO,
+    SCALE,
+    STARTER,
+    get_package,
+)
 from scm_agent.packages import missing_required_inputs, run_package
 from scm_agent.registry import ToolRegistry
 from scm_agent.tools import build_default_registry
@@ -78,6 +89,30 @@ def test_scope_matches_monetization_brief():
         "pricing", "cost_to_serve", "learning_curve", "returns", "risk", "dea",
     }
     assert len(GROWTH.tool_keys()) == 26
+
+    scale_extra = {
+        "sop", "facility_location", "transportation", "warehouse_layout",
+        "slotting", "queuing", "scheduling", "earned_value", "leadership_chain",
+    }
+    assert set(SCALE.tool_keys()) == set(GROWTH.tool_keys()) | scale_extra
+    assert len(SCALE.tool_keys()) == 35, "the full catalog is 35 tools, not 34"
+
+    assert set(PROYECTO_RED_ALMACEN.tool_keys()) == {
+        "facility_location", "transportation", "warehouse_layout",
+        "slotting", "queuing", "scheduling",
+    }
+    assert set(PROYECTO_SOURCING.tool_keys()) == {
+        "sourcing", "landed_cost", "acceptance_sampling",
+    }
+
+
+def test_retainer_ejecutivo_is_scale_same_tools_different_governance():
+    """The brief is explicit: Retainer Ejecutivo has the SAME 35 tools as Scale -
+    what differs is cadence/SLA, not capability."""
+    assert set(RETAINER_EJECUTIVO.tool_keys()) == set(SCALE.tool_keys())
+    assert RETAINER_EJECUTIVO.key != SCALE.key
+    assert RETAINER_EJECUTIVO.price != SCALE.price
+    assert RETAINER_EJECUTIVO.cadence != SCALE.cadence
 
 
 def test_derive_steps_follow_their_source():
@@ -241,3 +276,130 @@ def test_cycle_count_derives_from_abc_classification(demo_intake, tmp_path):
     abc_classes = {c.product_id: c.abc for c in abc.classifications}
     scheduled = {t.product_id for t in cc.schedule}
     assert scheduled <= set(abc_classes)
+
+
+def test_scale_end_to_end(demo_intake, tmp_path):
+    out = tmp_path / "out"
+    result = _run(SCALE, demo_intake, out)
+    _assert_delivered(result, out, "scale", 35)
+
+
+def test_retainer_ejecutivo_end_to_end(demo_intake, tmp_path):
+    out = tmp_path / "out"
+    result = _run(RETAINER_EJECUTIVO, demo_intake, out)
+    _assert_delivered(result, out, "retainer_ejecutivo", 35)
+
+
+def test_proyecto_red_almacen_end_to_end(demo_intake, tmp_path):
+    out = tmp_path / "out"
+    result = _run(PROYECTO_RED_ALMACEN, demo_intake, out)
+    _assert_delivered(result, out, "proyecto_red_almacen", 6)
+    # warehouse_layout has no `deck=` (its output is layout.json/report.md/viewer,
+    # not the standard Deliverable) - confirm it still delivers without one.
+    files = {name for name in result.deliverables if name.startswith("warehouse_layout_")}
+    assert files == {"warehouse_layout_layout", "warehouse_layout_report", "warehouse_layout_viewer"}
+
+
+def test_proyecto_sourcing_end_to_end(demo_intake, tmp_path):
+    out = tmp_path / "out"
+    result = _run(PROYECTO_SOURCING, demo_intake, out)
+    _assert_delivered(result, out, "proyecto_sourcing", 3)
+
+
+def test_leadership_chain_scores_come_from_liderazgo_csv(demo_intake, tmp_path):
+    """leadership_chain takes params["scores"], not a CSV data_path - confirm the
+    package's params_from_input actually threads liderazgo.csv into the profile
+    rather than silently falling through to needs_clarification."""
+    out = tmp_path / "out"
+    result = _run(SCALE, demo_intake, out)
+    step = next(s for s in result.steps if s.tool_key == "leadership_chain")
+    assert step.status == "ok"
+    profile = step.report
+    # liderazgo.csv fixture is C=3, H=2, A=3, I=1, N=2
+    assert profile.scores == {"C": 3, "H": 2, "A": 3, "I": 1, "N": 2}
+
+
+def test_warehouse_layout_uses_project_params_without_a_file(demo_intake, tmp_path):
+    """warehouse_layout has input_slot=None (generative, not client-data-driven);
+    confirm it runs off the step's static params, not the demo intake folder."""
+    out = tmp_path / "out"
+    result = _run(SCALE, demo_intake, out)
+    step = next(s for s in result.steps if s.tool_key == "warehouse_layout")
+    assert step.status == "ok"
+    assert step.source == "conector (sin archivo)"
+    layout, _report_md = step.report
+    assert layout.building.width_m == 90.0
+    assert len(layout.docks) == 10
+
+
+def test_scale_skips_new_optional_tools_without_their_files(demo_intake, tmp_path):
+    """Scale without any of the 9 new optional files still delivers on the Growth
+    core - the new mando-ejecutivo tools skip, they don't block (same philosophy
+    as test_optional_steps_skip_without_blocking for Growth)."""
+    partial = tmp_path / "partial"
+    partial.mkdir()
+    core_files = (
+        "ventas.csv", "maestro.csv", "planilla.xlsx", "supuestos.csv",
+        "stock.csv", "finanzas.csv", "pedidos.csv",
+    )
+    for name in core_files:
+        (partial / name).write_bytes((demo_intake / name).read_bytes())
+    params = {k: v for k, v in DEMO_PARAMS.items() if k != "use_odoo"}
+    result = _run(SCALE, partial, tmp_path / "out", params=params)
+    assert result.status == "ok"
+    skipped = {s.tool_key for s in result.steps if s.status == "skipped"}
+    executed = {s.tool_key for s in result.steps if s.status == "ok"}
+    # file-gated optional tools skip without their CSV
+    file_gated_optional = {
+        "facility_location", "transportation", "slotting",
+        "queuing", "scheduling", "earned_value", "leadership_chain",
+    }
+    assert file_gated_optional <= skipped
+    # warehouse_layout is optional too, but parametric (input_slot=None, no
+    # file/gate) - it runs off its static step params regardless, so it's
+    # never in "skipped"; sop is required (reuses ventas.csv, already present)
+    assert {"sop", "warehouse_layout"} <= executed
+
+
+def test_missing_required_inputs_for_proyecto_packages(tmp_path):
+    missing_red = missing_required_inputs(PROYECTO_RED_ALMACEN, tmp_path)
+    assert len(missing_red) == 5  # warehouse_layout has no file, so 6 tools -> 5 files
+    assert any(line.startswith("ubicaciones.csv") for line in missing_red)
+    assert any(line.startswith("trabajos.csv") for line in missing_red)
+
+    missing_sourcing = missing_required_inputs(PROYECTO_SOURCING, tmp_path)
+    assert len(missing_sourcing) == 3
+    assert any(line.startswith("proveedores.csv") for line in missing_sourcing)
+    assert any(line.startswith("calidad_aql.csv") for line in missing_sourcing)
+
+
+def test_malformed_liderazgo_csv_blocks_with_an_actionable_message(demo_intake, tmp_path):
+    """A client CSV with a score out of 0-4 or a missing CHAIN dimension column
+    must not crash the runner, and must block the package (leadership_chain is
+    optional, but an optional step that RAN and errored still blocks - same
+    philosophy as test_optional_step_qa_failure_also_blocks) with a message an
+    operator can act on, not a raw KeyError repr."""
+    import pandas as pd
+
+    partial = tmp_path / "partial"
+    partial.mkdir()
+    for name in demo_intake.iterdir():
+        partial.joinpath(name.name).write_bytes(name.read_bytes())
+
+    pd.DataFrame([{"C": 7, "H": 2, "A": 3, "I": 1, "N": 2}]).to_csv(
+        partial / "liderazgo.csv", index=False
+    )
+    result = _run(SCALE, partial, tmp_path / "out_range")
+    assert result.status == "error"
+    assert result.deliverables == {}
+    step = next(s for s in result.steps if s.tool_key == "leadership_chain")
+    assert "fuera de 0-4" in step.messages[0]
+
+    pd.DataFrame([{"C": 3, "H": 2, "A": 3, "I": 1}]).to_csv(
+        partial / "liderazgo.csv", index=False
+    )
+    result = _run(SCALE, partial, tmp_path / "out_missing")
+    assert result.status == "error"
+    assert result.deliverables == {}
+    step = next(s for s in result.steps if s.tool_key == "leadership_chain")
+    assert "no tiene columna" in step.messages[0]
