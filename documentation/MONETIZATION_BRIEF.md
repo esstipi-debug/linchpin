@@ -38,9 +38,45 @@ Correcciones surgidas en verificación: Cogsy **no** parte en $199 (parte en $49
 | **B. Mixto Odoo** (hispano + anglo) | 2 retainers $2.500 + 1 proyecto Odoo/mes $3.000 (implementación módulo + política de inventario) | $8.000 |
 | **C. Escalera** (arranque) | Mes 1–3: 2 contratos Upwork (~$2–3k) + 1 retainer $2.500 → mes 4–6: convertir a 3 retainers y subir precio | $8k en mes ~6 |
 
+## Estructura de empaquetado comercial (7 secciones vendibles por separado)
+
+> Diseñada con un panel de 3 jueces independientes que evaluó 3 estructuras (escalera de
+> consultoría, **tiers fijos**, modular à la carte) en 5 criterios: claridad para el
+> comprador, techo de ingreso, facilidad de upsell, defendibilidad frente a la competencia,
+> viabilidad para un operador solo. Ganó **tiers fijos** (40,3/50 promedio de los 3 jueces,
+> vs. 37,7 escalera y 32,3 modular — los 3 jueces lo prefirieron explícitamente por ser el
+> más simple de vender y operar en solitario), injertando 3 ideas de la escalera perdedora:
+> el diagnóstico de entrada de bajo riesgo, el techo superior vía retainer ejecutivo, y los
+> 2 proyectos puntuales de alto ticket como única excepción a la regla de oro. **Ninguna
+> sección vende un tool suelto** — siempre un paquete completo de varios tools.
+
+| # | Sección | Precio | Cadencia | Tools incluidas | Cliente objetivo |
+|---|---|---|---|---|---|
+| 1 | **Diagnóstico de Arranque** | $1.500–2.500 único | Único, sprint 2 semanas | 4: `data_quality`, `abc_xyz`, `excess_obsolete`, `financial_kpis` | Primer contacto, cero confianza construida |
+| 2 | **Starter** — Fundamentos de Inventario | $2.000/mes | Mensual, alcance fijo | 8: `forecast`, `abc_xyz`, `whatif`, `inventory_optimization`, `newsvendor`, `excel_replenishment`, `cycle_count`, `data_quality` | E-commerce/distribuidor mono-almacén, $1–10M, compra "a ojo" en Excel |
+| 3 | **Growth** — Operación Completa de SC | $4.000/mes | Mensual + QBR trimestral | 26 (todo lo anterior + `multi_echelon`, `ddmrp`, `simulation`, `drp`, `odoo_replenishment`, `reconciliation`, `fefo`, `sourcing`, `landed_cost`, `acceptance_sampling`, `pricing`, `cost_to_serve`, `learning_curve`, `returns`, `risk`, `dea`) | Empresa en crecimiento, multi-almacén/canal, con o migrando a ERP (Odoo) |
+| 4 | **Scale** — Red, S&OP y Mando Ejecutivo | $7.500/mes | Quincenal + S&OP mensual | Las 34 tools del catálogo completo (+ `facility_location`, `transportation`, `warehouse_layout`, `slotting`, `queuing`, `scheduling`, `sop`, `earned_value`, `leadership_chain`) | Mid-market con red real (2+ plantas/CDs) |
+| 5 | **Retainer Ejecutivo Fraccional** | $9.000–12.000/mes | Mensual + cadencia semanal + escalamiento con SLA | Mismas 34 tools de Scale — la diferencia es gobierno, no capacidad | Cliente maduro (6–18 meses en Scale), mandato de VP/COO fraccional |
+| 6 | **Proyecto de Red, Almacén y Operación** | $8.000–18.000 único | Único, 4–8 semanas | 6: `facility_location`, `transportation`, `warehouse_layout`, `slotting`, `queuing`, `scheduling` | Inflexión estructural: nueva bodega, rediseño de red/almacén |
+| 7 | **Proyecto de Sourcing y Costo de Importación** | $5.000–10.000 único | Único, recurrible trimestral/anual | 3: `sourcing`, `landed_cost`, `acceptance_sampling` | Importadores / manufactura offshore |
+
+**Camino a $8.000/mes:** 2 clientes Growth ($4.000 × 2) es la ruta más corta y el mix
+recomendado por defecto. Alternativas: 4 Starter, 1 Scale + 1 cliente pequeño, o 1 solo
+Retainer Ejecutivo. Los 2 proyectos puntuales (única excepción a "nunca vender un tool
+suelto") también cruzan el piso por sí solos en el mes que se cierran, aunque como caja
+puntual, no como MRR. Techo por cuenta a lo largo de su ciclo de vida (Diagnóstico → tier
+→ Scale → Retainer Ejecutivo + proyectos anuales): **$150.000–250.000+/año** en la cuenta
+más grande y madura de la cartera.
+
 ## Qué hacer primero
 
-**30 días:** (1) Empaquetar 2 ofertas de precio fijo con los entregables que Linchpin ya genera: *Inventory Optimization Sprint* ($1.500–3.000 one-time, 2 semanas) y *retainer de operador de inventario* ($2.000–3.000/mes) — el modelo "assessment + sprint + retainer" es el patrón recomendado en pricing de consultoría SC. (2) Publicar el módulo Odoo (gratis o barato) como anzuelo y ejecutar las submissions ya preparadas en `GTM_SUBMISSIONS.md`. (3) Conseguir los 2 primeros clientes vía Upwork/red directa aunque sea bajo precio: el objetivo es el caso de estudio con ahorro medido en $.
+**30 días:** (1) Publicar el Diagnóstico de Arranque ($1.500–2.500, 2 semanas) y el tier
+Starter ($2.000/mes) como las dos ofertas de entrada — el modelo "assessment + sprint +
+retainer" es el patrón recomendado en pricing de consultoría SC. (2) Publicar el módulo
+Odoo (gratis o barato) como anzuelo y ejecutar las submissions ya preparadas en
+`GTM_SUBMISSIONS.md`. (3) Conseguir los 2 primeros clientes vía Upwork/red directa aunque
+sea con el Diagnóstico a precio bajo: el objetivo es el caso de estudio con ahorro medido
+en $ que convierte a Starter o directo a Growth.
 
 **90 días:** (4) Con 1–2 casos con ahorro cuantificado, vender en inglés a marcas Shopify/DTC de $1–10M (el segmento que ya paga $3k–7k/mes por roles fraccionales) posicionándote como *fractional inventory/supply-chain operator*, no como freelancer. (5) En español, atacar pymes con Odoo en LatAm/España vía el módulo + partners. (6) Ofrecer pricing por valor (10–20% del ahorro año 1) en cuentas con inventario grande. **No** invertir en SaaS self-serve ni esperar ingresos del MCP todavía.
 
