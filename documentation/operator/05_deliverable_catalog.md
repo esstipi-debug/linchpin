@@ -82,10 +82,14 @@ listos para enviar a un prospecto: [documentation/paquetes/](../paquetes/README.
 | **Diagnóstico de Arranque** (sprint 2 semanas) | USD 1.500–2.500 único | 4: calidad de datos, ABC-XYZ, E&O, KPIs financieros | Convertir el hallazgo cuantificado en la propuesta del retainer |
 | **Starter — Fundamentos de Inventario** | USD 2.000/mes | 8: + pronóstico, política de inventario, what-if, planilla staged, conteo cíclico, newsvendor | Revisar y aprobar el plan de compra staged (RB-5); la revisión mensual |
 | **Growth — Operación Completa de SC** | USD 4.000/mes + QBR | 26: + pricing, cost-to-serve, Odoo, red (multi-echelon/DDMRP/DRP/simulación), IRA, FEFO, proveedores, riesgo, DEA | Facilitar la revisión mensual y el QBR; adjudicar y negociar |
+| **Scale — Red, S&OP y Mando Ejecutivo** | USD 7.500/mes | 35 (catálogo completo): + S&OP, ubicación de instalaciones, transporte, bodega 3D, slotting, personal (queuing), secuenciación, EVM, liderazgo | Facilitar el ciclo S&OP; forzar la decisión ejecutiva mensual |
+| **Retainer Ejecutivo Fraccional** | USD 9.000–12.000/mes | Mismas 35 de Scale — gobierno, no capacidad | Presencia semanal, mandato ejecutivo, escalamiento con SLA (RB-6) |
+| **Proyecto de Red, Almacén y Operación** | USD 8.000–18.000 único | 6: ubicación de instalaciones, transporte, bodega 3D, slotting, personal, secuenciación | Facilitar el diseño iterativo en las semanas 3–6 del proyecto |
+| **Proyecto de Sourcing y Costo de Importación** | USD 5.000–10.000 único, recurrible | 3: sourcing, landed cost, muestreo de aceptación | Llevar la adjudicación recomendada a la mesa de negociación |
 
 El procedimiento paso a paso está en [RB-9](04_runbooks.md#rb-9--correr-un-paquete-comercial).
-Las 4 secciones superiores de la escalera (Scale, Retainer Ejecutivo, 2 proyectos
-puntuales) están definidas en el brief pero aún no empaquetadas como runner.
+Las 7 secciones de la escalera están todas empaquetadas como runner ejecutable
+(`scm_agent/package_specs.py`).
 
 ---
 

@@ -1,19 +1,23 @@
 # Paquetes comerciales — one-pagers de venta
 
-Los tres paquetes de entrada de la escalera comercial (fuente de verdad de
-precio/alcance: [MONETIZATION_BRIEF.md](../MONETIZATION_BRIEF.md), sección
-"Estructura de empaquetado comercial"). Cada one-pager está escrito para
-**enviarse tal cual a un prospecto**:
+Las 7 secciones de la escalera comercial (fuente de verdad de precio/alcance:
+[MONETIZATION_BRIEF.md](../MONETIZATION_BRIEF.md), sección "Estructura de
+empaquetado comercial"), todas ya ejecutables de punta a punta. Cada one-pager
+está escrito para **enviarse tal cual a un prospecto**:
 
-| Paquete | Precio | Cadencia | One-pager |
-|---|---|---|---|
-| **Diagnóstico de Arranque** | USD 1.500–2.500 único | Sprint de 2 semanas | [diagnostico-arranque.md](diagnostico-arranque.md) |
-| **Starter — Fundamentos de Inventario** | USD 2.000/mes | Mensual, alcance fijo | [starter-fundamentos.md](starter-fundamentos.md) |
-| **Growth — Operación Completa de SC** | USD 4.000/mes | Mensual + QBR trimestral | [growth-operacion.md](growth-operacion.md) |
+| # | Paquete | Precio | Cadencia | One-pager |
+|---|---|---|---|---|
+| 1 | **Diagnóstico de Arranque** | USD 1.500–2.500 único | Sprint de 2 semanas | [diagnostico-arranque.md](diagnostico-arranque.md) |
+| 2 | **Starter — Fundamentos de Inventario** | USD 2.000/mes | Mensual, alcance fijo | [starter-fundamentos.md](starter-fundamentos.md) |
+| 3 | **Growth — Operación Completa de SC** | USD 4.000/mes | Mensual + QBR trimestral | [growth-operacion.md](growth-operacion.md) |
+| 4 | **Scale — Red, S&OP y Mando Ejecutivo** | USD 7.500/mes | Quincenal + S&OP mensual | [scale-red-sop.md](scale-red-sop.md) |
+| 5 | **Retainer Ejecutivo Fraccional** | USD 9.000–12.000/mes | Mensual + semanal + SLA | [retainer-ejecutivo.md](retainer-ejecutivo.md) |
+| 6 | **Proyecto de Red, Almacén y Operación** | USD 8.000–18.000 único | Proyecto, 4–8 semanas | [proyecto-red-almacen.md](proyecto-red-almacen.md) |
+| 7 | **Proyecto de Sourcing y Costo de Importación** | USD 5.000–10.000 único | Proyecto, recurrible trimestral/anual | [proyecto-sourcing.md](proyecto-sourcing.md) |
 
-Las otras 4 secciones de la estructura (Scale, Retainer Ejecutivo y los 2
-proyectos puntuales) aún no tienen paquete ejecutable ni one-pager — están
-definidas solo en el brief.
+Nota: Scale (4) y Retainer Ejecutivo (5) corren el **mismo** catálogo completo
+de 35 herramientas — el brief es explícito en que la diferencia es gobierno
+(cadencia, escalamiento con SLA), no capacidad analítica.
 
 ## Para el operador
 
@@ -24,16 +28,23 @@ entregable completo de cada herramienta:
 
 ```bash
 # checklist de intake para pedirle al cliente
-python examples/run_package.py --package starter --checklist
+python examples/run_package.py --package scale --checklist
 
 # correr sobre la carpeta de intake del cliente
 python examples/run_package.py --package diagnostico --intake intake/acme --client "ACME"
 
 # demo completa con datos sinteticos (sin archivos de cliente)
-python examples/run_package.py --package growth --demo
+python examples/run_package.py --package scale --demo
 ```
 
 La garantía "QA falla => no hay entregable" se preserva a nivel de **paquete**:
 si un solo análisis ejecutado falla su QA, no se escribe ningún archivo. El
 procedimiento operativo completo está en el runbook
 [RB-9](../operator/04_runbooks.md#rb-9--correr-un-paquete-comercial).
+
+Dos capacidades del catálogo completo (Scale/Retainer) tienen un intake
+distinto al resto: `warehouse_layout` (diseño de bodega) no toma un CSV — es
+parametrico, se define en una sesión con el cliente (dimensiones de sitio,
+edificio, racks, andenes) — y `leadership_chain` (diagnóstico de liderazgo) se
+releva **vos** con el cliente vía una autoevaluación breve, nunca se le manda
+un CSV en blanco.

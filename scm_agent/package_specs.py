@@ -1,4 +1,4 @@
-"""The three sellable commercial packages (specs only; the runner lives in
+"""The seven sellable commercial packages (specs only; the runner lives in
 ``scm_agent/packages.py``).
 
 Scope, price and cadence mirror the "Estructura de empaquetado comercial" in
@@ -10,6 +10,15 @@ three diverge, fix them together in the same PR.
 - **starter** - Fundamentos de Inventario: fixed monthly scope, 8 tools.
 - **growth** - Operacion Completa de SC: monthly + quarterly QBR, 26 tools
   (everything in diagnostico + starter, plus 16 more).
+- **scale** - Red, S&OP y Mando Ejecutivo: biweekly + monthly S&OP, the full
+  35-tool catalog (everything in growth, plus 9 more).
+- **retainer_ejecutivo** - Retainer Ejecutivo Fraccional: same 35 tools as
+  scale - the brief is explicit that what changes is governance (weekly
+  cadence, SLA escalation), not capability, so this spec reuses scale's step
+  list verbatim under different commercial metadata.
+- **proyecto_red_almacen** - one-off network/warehouse/ops project, 6 tools.
+- **proyecto_sourcing** - one-off sourcing/landed-cost project, 3 tools
+  (reuses growth's supplier/import/quality intake slots).
 
 Steps whose input file is a real burden to produce every month are optional:
 they run when the file is present and are recorded as skipped (never blocking)
@@ -138,6 +147,42 @@ _UNIDADES = PackageInput(
     description="unidades comparables (bodegas/proveedores/tiendas) para frontera de eficiencia DEA",
     columns="unit + columnas con prefijo input_* y output_*",
 )
+_UBICACIONES = PackageInput(
+    slot="ubicaciones", filename="ubicaciones.csv",
+    description="puntos de demanda (clientes/tiendas/CDs) para ubicar una nueva instalacion",
+    columns="x, y - coordenadas locales o lat/lon (+ name, weight opcionales)",
+)
+_ENVIOS = PackageInput(
+    slot="envios", filename="envios.csv",
+    description="historial de envios para elegir el modo de transporte optimo por envio",
+    columns="weight_kg, distance_km (+ shipment_id, lane, units, order_value opcionales)",
+)
+_LINEAS_PEDIDO = PackageInput(
+    slot="lineas_pedido", filename="lineas_pedido.csv",
+    description="lineas de pedido (pedido x SKU) para el slotting COI + afinidad",
+    columns="order_id, product_id (+ unit_volume opcional)",
+)
+_ESTACIONES = PackageInput(
+    slot="estaciones", filename="estaciones.csv",
+    description="estaciones de servicio (mostrador/dock/call center) para dimensionar personal",
+    columns="station, arrival_rate, service_rate (+ wait_cost, server_cost opcionales)",
+)
+_TRABAJOS = PackageInput(
+    slot="trabajos", filename="trabajos.csv",
+    description="trabajos a secuenciar en planta/taller (una maquina)",
+    columns="job, processing_time (+ due_date opcional)",
+)
+_VALOR_GANADO = PackageInput(
+    slot="valor_ganado", filename="valor_ganado.csv",
+    description="control de proyectos activos por valor ganado (EVM)",
+    columns="task, planned, earned, actual",
+)
+_LIDERAZGO = PackageInput(
+    slot="liderazgo", filename="liderazgo.csv",
+    description="autoevaluacion de liderazgo (modelo CHAIN) - relevala vos con el cliente, "
+                "no se le manda un CSV a nadie",
+    columns="C, H, A, I, N - una fila, cada valor entero 0-4",
+)
 
 
 # ---- derives / fallbacks / gates ----------------------------------------------
@@ -171,6 +216,48 @@ def _odoo_gate(params: dict) -> str:
     if params.get("use_odoo") or os.environ.get("ODOO_URL"):
         return ""
     return "sin credenciales Odoo (ODOO_URL) ni use_odoo=true; se omite"
+
+
+def _leadership_scores_from_csv(path) -> dict:
+    """leadership_chain takes params["scores"], not a data_path - liderazgo.csv is
+    a one-row CHAIN self-assessment (C,H,A,I,N, each 0-4) the operator relevates
+    with the client; this converts it into the params override the tool reads.
+    Raises ValueError with an operator-actionable message (not a raw KeyError) so
+    the package's error path surfaces something fixable, not just "'N'"."""
+    df = pd.read_csv(path)
+    if df.empty:
+        raise ValueError("liderazgo.csv esta vacio - debe tener una fila con C,H,A,I,N")
+    row = df.iloc[0]
+    order = ("C", "H", "A", "I", "N")
+    missing = [code for code in order if code not in row.index]
+    if missing:
+        raise ValueError(
+            f"liderazgo.csv no tiene columna(s) {missing} - se esperan exactamente C,H,A,I,N"
+        )
+    try:
+        scores = [int(row[code]) for code in order]
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"liderazgo.csv tiene un valor no entero en C,H,A,I,N: {exc}") from exc
+    out_of_range = [f"{code}={v}" for code, v in zip(order, scores) if not 0 <= v <= 4]
+    if out_of_range:
+        raise ValueError(
+            f"liderazgo.csv tiene valor(es) fuera de 0-4: {', '.join(out_of_range)}"
+        )
+    return {"scores": scores}
+
+
+# A mid-size DC scenario for the parametric warehouse_layout tool - it has no CSV
+# input at all (generative from a nested config dict, not client data), so this
+# doubles as the step's default params. Client-specific dims come from the
+# operator overriding these keys directly (they replace the whole nested dict,
+# not a deep merge) when scoping the project.
+_WAREHOUSE_PROJECT_PARAMS = {
+    "site": {"width_m": 220.0, "depth_m": 160.0},
+    "building": {"width_m": 90.0, "depth_m": 85.0, "height_m": 13.0, "levels": 4},
+    "racks": {"modules": 8, "bays_per_rack": 22, "aisle_width_m": 3.2},
+    "docks": {"count": 10, "face": "south"},
+    "gates": {"count": 3},
+}
 
 
 # ---- the three packages --------------------------------------------------------
@@ -250,8 +337,98 @@ GROWTH = PackageSpec(
     ),
 )
 
+_SCALE_EXTRA_STEPS = (
+    # Called out explicitly in the brief as Scale's defining monthly ritual
+    # ("Quincenal + S&OP mensual") - required, but reuses ventas.csv, which
+    # Growth already requires, so this adds no new required file.
+    PackageStep("sop", "ventas", cadence="mensual (ciclo S&OP)"),
+    PackageStep("facility_location", "ubicaciones", required=False,
+                cadence="por disparador (rediseno de red)",
+                params={"current_x": 40.0, "current_y": 25.0}),
+    PackageStep("transportation", "envios", required=False,
+                cadence="mensual (si hay flota/fletes propios)"),
+    PackageStep("warehouse_layout", None, required=False,
+                cadence="por disparador (rediseno de bodega)",
+                params=_WAREHOUSE_PROJECT_PARAMS),
+    PackageStep("slotting", "lineas_pedido", required=False,
+                cadence="mensual (si hay bodega propia)"),
+    PackageStep("queuing", "estaciones", required=False,
+                cadence="mensual (si hay estaciones de servicio/mostrador)"),
+    PackageStep("scheduling", "trabajos", required=False,
+                cadence="mensual (si hay programacion de planta/taller)"),
+    PackageStep("earned_value", "valor_ganado", required=False,
+                cadence="QBR trimestral (si hay proyectos activos)"),
+    PackageStep("leadership_chain", "liderazgo", required=False,
+                cadence="QBR trimestral (coaching ejecutivo)",
+                params_from_input=_leadership_scores_from_csv),
+)
+_SCALE_STEPS = GROWTH.steps + _SCALE_EXTRA_STEPS
+_SCALE_INPUTS = GROWTH.inputs + (
+    _UBICACIONES, _ENVIOS, _LINEAS_PEDIDO, _ESTACIONES, _TRABAJOS,
+    _VALOR_GANADO, _LIDERAZGO,
+)
+
+SCALE = PackageSpec(
+    key="scale",
+    title="Scale - Red, S&OP y Mando Ejecutivo",
+    price="USD 7,500 / mes",
+    cadence="quincenal + S&OP mensual",
+    audience="mid-market con red real (2+ plantas/CDs)",
+    inputs=_SCALE_INPUTS,
+    steps=_SCALE_STEPS,
+)
+
+RETAINER_EJECUTIVO = PackageSpec(
+    key="retainer_ejecutivo",
+    title="Retainer Ejecutivo Fraccional",
+    price="USD 9,000 - 12,000 / mes",
+    cadence="mensual + cadencia semanal + escalamiento con SLA",
+    audience="cliente maduro (6-18 meses en Scale), mandato de VP/COO fraccional",
+    # Deliberately the SAME tool set as Scale - the brief is explicit the
+    # difference is governance (weekly cadence, SLA-routed escalation, see
+    # RB-6), not analytical capability. Nothing to re-derive here.
+    inputs=_SCALE_INPUTS,
+    steps=_SCALE_STEPS,
+)
+
+PROYECTO_RED_ALMACEN = PackageSpec(
+    key="proyecto_red_almacen",
+    title="Proyecto de Red, Almacen y Operacion",
+    price="USD 8,000 - 18,000 (pago unico)",
+    cadence="proyecto unico, 4-8 semanas",
+    audience="inflexion estructural: nueva bodega, rediseno de red/almacen",
+    inputs=(_UBICACIONES, _ENVIOS, _LINEAS_PEDIDO, _ESTACIONES, _TRABAJOS),
+    steps=(
+        PackageStep("facility_location", "ubicaciones", cadence="proyecto",
+                    params={"current_x": 40.0, "current_y": 25.0}),
+        PackageStep("transportation", "envios", cadence="proyecto"),
+        PackageStep("warehouse_layout", None, cadence="proyecto",
+                    params=_WAREHOUSE_PROJECT_PARAMS),
+        PackageStep("slotting", "lineas_pedido", cadence="proyecto"),
+        PackageStep("queuing", "estaciones", cadence="proyecto"),
+        PackageStep("scheduling", "trabajos", cadence="proyecto"),
+    ),
+)
+
+PROYECTO_SOURCING = PackageSpec(
+    key="proyecto_sourcing",
+    title="Proyecto de Sourcing y Costo de Importacion",
+    price="USD 5,000 - 10,000 (pago unico, recurrible trimestral/anual)",
+    cadence="proyecto unico, recurrible trimestral/anual",
+    audience="importadores / manufactura offshore",
+    inputs=(_PROVEEDORES, _IMPORTACIONES, _CALIDAD),
+    steps=(
+        PackageStep("sourcing", "proveedores", cadence="proyecto"),
+        PackageStep("landed_cost", "importaciones", cadence="proyecto"),
+        PackageStep("acceptance_sampling", "calidad", cadence="proyecto"),
+    ),
+)
+
 PACKAGES: dict[str, PackageSpec] = {
-    spec.key: spec for spec in (DIAGNOSTICO, STARTER, GROWTH)
+    spec.key: spec for spec in (
+        DIAGNOSTICO, STARTER, GROWTH, SCALE, RETAINER_EJECUTIVO,
+        PROYECTO_RED_ALMACEN, PROYECTO_SOURCING,
+    )
 }
 
 
