@@ -76,3 +76,24 @@ def test_achieved_service_level_round_trips_with_safety_stock():
 def test_achieved_service_level_zero_std():
     assert achieved_service_level(5, 0, 1) == 1.0
     assert achieved_service_level(-5, 0, 1) == 0.0
+
+
+def test_achieved_service_level_scales_with_risk_periods():
+    """The sqrt(tau) term must actually do something -- a bug here (e.g. dropping
+    the sqrt, or inverting risk_periods) would not be caught by any test that
+    only exercises risk_periods=1."""
+    # Same safety stock quantity covers a SHORTER risk period better than a longer one.
+    short = achieved_service_level(50, 25, risk_periods=1)
+    long = achieved_service_level(50, 25, risk_periods=4)
+    assert short > long
+    # Cross-check against the independent norm.cdf formula for risk_periods=4.
+    expected = float(norm.cdf(50 / (25 * (4**0.5))))
+    assert long == pytest.approx(expected)
+
+
+def test_achieved_service_level_rejects_nonpositive_risk_periods():
+    """Matches safety_stock()'s own validation for the same parameter."""
+    with pytest.raises(ValueError, match="risk_periods must be > 0"):
+        achieved_service_level(20, 25, risk_periods=-1)
+    with pytest.raises(ValueError, match="risk_periods must be > 0"):
+        achieved_service_level(20, 25, risk_periods=0)

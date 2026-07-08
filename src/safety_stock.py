@@ -78,6 +78,8 @@ def achieved_service_level(
     risk_periods: float = 1.0,
 ) -> float:
     """alpha = Phi(Ss / (sigma_d * sqrt(tau))) -- analytic inverse of safety_stock()."""
+    if risk_periods <= 0:
+        raise ValueError("risk_periods must be > 0")
     if demand_std_per_period == 0:
         return 1.0 if safety_stock_qty >= 0 else 0.0
     return float(norm.cdf(safety_stock_qty / (demand_std_per_period * (risk_periods**0.5))))
