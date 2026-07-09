@@ -141,7 +141,7 @@ Naive Q=500 cost=538, ratio=1.285
 
 ## Exercise 9 — Multi-echelon: no risk-pooling vs GSM-optimized (Section 10.4)
 
-**Given:** the Exercise 6 scenario (lead times [4,3,2], mu=100, sigma=25, holding costs [1,2,4], review periods [1,2,4], 95% service level). Naive: all safety stock held at the customer-facing node (no risk-pooling across the chain) -- already pinned by this repo's own `test_gsm_case4_all_downstream_cost`.
+**Given:** the Exercise 6 scenario (lead times [4,3,2], mu=100, sigma=25, holding costs [1,2,4], review period 1.0, 95% service level). Naive: all safety stock held at the customer-facing node (no risk-pooling across the chain) -- already pinned by this repo's own `test_gsm_case4_all_downstream_cost`.
 
 ```bash
 python -c "
@@ -188,7 +188,7 @@ Demand-weighted WAPE improvement: 19.4 percent
 ```
 
 Linchpin's classification-routed forecast (99/100 sampled SKUs were
-intermittent, routed to Croston's method) is ~19.5% more accurate in absolute
+intermittent, routed to Croston's method) is ~19.4% more accurate in absolute
 terms (MAE) than naive last-value persistence, and ~19.4% more accurate on a
 demand-weighted WAPE -- the same conclusion, from two different angles.
 
