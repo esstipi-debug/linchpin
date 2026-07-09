@@ -28,7 +28,13 @@ def compare_forecast_methods(
     naive_forecast: list[float],
     smart_forecast: list[float],
 ) -> ForecastComparison:
-    """improvement_pct is the WAPE reduction of smart_forecast over naive_forecast."""
+    """improvement_pct is the WAPE reduction of smart_forecast over naive_forecast.
+
+    Edge case: if naive_forecast is already a perfect match (naive_wape == 0),
+    improvement_pct is reported as 0.0 regardless of smart_forecast's own
+    accuracy (there's no meaningful percentage relative to a zero baseline) --
+    check naive_wape == 0 before treating improvement_pct == 0.0 as "no change."
+    """
     naive_mae_v = mae(actuals, naive_forecast)
     naive_wape_v = wape(actuals, naive_forecast)
     smart_mae_v = mae(actuals, smart_forecast)

@@ -25,6 +25,19 @@ def test_compare_forecast_methods_identical_forecasts_zero_improvement():
     assert result.naive_mae == result.smart_mae
 
 
+def test_compare_forecast_methods_perfect_naive_stays_finite():
+    """If the naive method happens to be a perfect forecast (naive_wape=0), the
+    division-by-zero guard must keep improvement_pct finite rather than raising
+    -- this exact case is untested by the other 3 tests, all of which have a
+    strictly positive naive_wape."""
+    actuals = [10, 20, 30]
+    naive_forecast = [10, 20, 30]  # perfect -> naive_wape == 0
+    smart_forecast = [11, 19, 31]  # imperfect but reasonable
+    result = compare_forecast_methods(actuals, naive_forecast, smart_forecast)
+    assert result.naive_wape == 0.0
+    assert result.improvement_pct == 0.0  # guard fallback, not a crash
+
+
 def test_compare_forecast_methods_hand_computed_mae():
     """Hand-computed MAE cross-check, independent of mae()/wape() themselves."""
     actuals = [10, 20, 30]
