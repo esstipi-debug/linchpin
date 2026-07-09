@@ -392,18 +392,40 @@ This exercises every new function and demonstrates the sell: an existing
 Linchpin analytical output becomes a PCAOB-shaped workpaper with lineage, and
 ends — necessarily — at a human.
 
-## 6. File-change inventory (when implementation is approved)
+## 6. File-change inventory
 
-| File | Change |
-|---|---|
-| `src/audit_evidence.py` | new — engine (sampling, MUS, tie-out, evidence) |
-| `jobs/audit_evidence_job.py` | new — five-function job + workpaper writer |
-| `scm_agent/tools.py` | +adapters, +`audit_evidence_tool()`, +1 register line |
-| `scm_agent/tool_options.py` | +`audit_evidence_options` |
-| `jobs/qa.py` | `coverage_gate`: audit outcomes must not be EXECUTED |
-| `tests/test_audit_evidence.py`, `tests/test_audit_evidence_tool.py` | new |
-| `examples/run_audit_evidence.py` | new — pilot CLI |
-| `documentation/METHODOLOGY.md`, `CLAUDE.md` tool count | update |
+Status legend: **DONE** = landed in this PR (the verifiable core); **PENDING** = deferred until
+the auditor blockers (memo §7 Q1–Q2) are resolved.
+
+| File | Change | Status |
+|---|---|---|
+| `src/audit_evidence.py` | engine (attribute + MUS sampling, GL tie-out, IPE attestation, `EvidenceRecord`) | **DONE** |
+| `tests/test_audit_evidence.py` | engine vs. published numbers (30 tests) | **DONE** |
+| `jobs/audit_evidence_job.py` | five-function job + workpaper writer | PENDING (needs Q2 framing) |
+| `scm_agent/tools.py` | +adapters, +`audit_evidence_tool()`, +1 register line | PENDING |
+| `scm_agent/tool_options.py` | +`audit_evidence_options` | PENDING |
+| `jobs/qa.py` | `coverage_gate`: audit outcomes must not be EXECUTED | PENDING |
+| `tests/test_audit_evidence_tool.py` | routing + end-to-end wiring | PENDING |
+| `examples/run_audit_evidence.py` | pilot CLI | PENDING |
+| `documentation/METHODOLOGY.md` | document the audit models | PENDING |
+
+### What landed (the "core") and why it is safe to land now
+
+`src/audit_evidence.py` is pure, agent-agnostic math with no wiring, so it commits nothing about
+the two open positioning questions. Its correctness is *edition-independent* and machine-checked:
+
+- **Reliability factors are the Poisson/gamma quantiles** the AICPA MUS tables tabulate, computed
+  in closed form (`gamma.ppf`) — the tests confirm RF_0 @ 5% = 3.00, RF_1 = 4.75, RF_2 = 6.30.
+- **Attribute sizes are exact binomial** (Clopper-Pearson) — the tests confirm the classic
+  95% / TDR 10% / 0-expected → n = 29 and 95% / 5% → n = 59 table values.
+- **MUS evaluation** is the Stringer bound with those factors; the tests pin it to a hand
+  calculation.
+- The one **provisional** piece is clearly quarantined and marked: the MUS *planning* size with a
+  non-zero expected misstatement (`_EXPANSION_FACTORS`, memo Q1). The worked-example test asserts
+  the expansion-factor method's own output (n = 53) and documents that the confidence-factor-table
+  method yields n = 55 — the exact reconciliation awaits the pinned AICPA guide edition.
+
+No tool is registered yet, so the catalogue tool count and `modes.py` are untouched.
 
 Phase 2 (separate PR): `jobs/sox_control_test_job.py` + tool + RCM/TOE
 writers + deficiency-classification proposal functions, reusing
