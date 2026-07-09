@@ -48,3 +48,14 @@ parametrico, se define en una sesión con el cliente (dimensiones de sitio,
 edificio, racks, andenes) — y `leadership_chain` (diagnóstico de liderazgo) se
 releva **vos** con el cliente vía una autoevaluación breve, nunca se le manda
 un CSV en blanco.
+
+## Conceptos en desarrollo (no registrados aún)
+
+No forman parte de las 7 secciones oficiales de arriba — son borradores de
+venta pensados como discovery/abre-puertas hacia una sección existente. Si
+se deciden productizar, precio y alcance se fijan primero en
+[MONETIZATION_BRIEF.md](../MONETIZATION_BRIEF.md).
+
+| Concepto | Abre la puerta a | One-pager |
+|---|---|---|
+| **Auditoría de Fricción Operacional** — cuantifica pérdidas de desplazamiento/equipo/ánimo rara vez medidas en el CD | Proyecto de Red, Almacén y Operación (6) | [auditoria-friccion-operacional.md](auditoria-friccion-operacional.md) |
