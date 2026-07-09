@@ -333,7 +333,12 @@ def run_benchmark(sample_size: int = 100, seed: int = 42) -> None:
     for _, row in df.iterrows():
         history = row[day_cols].astype(float).to_numpy()
         actuals = row[TEST_DAYS].astype(float).to_numpy()
-        if history.sum() == 0:
+        if history.sum() == 0 or actuals.sum() == 0:
+            # actuals.sum() == 0 matters here, not just history.sum(): wape()'s
+            # denominator is sum(|actual|), so an all-zero 28-day evaluation
+            # window (plausible for a slow-moving real SKU) makes wape() return
+            # inf, which then makes compare_forecast_methods()'s improvement_pct
+            # come out as nan and silently corrupt the aggregate average below.
             skipped += 1
             continue
 
