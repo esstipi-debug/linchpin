@@ -1,7 +1,88 @@
 # Linchpin — Session Handoff
 
-**Date:** 2026-07-09 · **Repo:** `esstipi-debug/linchpin` (private) · **Branch:** `feat/e1-sales-surface` (not yet merged, based off `main` @ `1f20101`, PRs up to **#124** merged; **#122** audit-evidence and **#123** benchmarks open concurrently in sibling worktrees)
+**Date:** 2026-07-10 · **Repo:** `esstipi-debug/linchpin` (private) · **Branch:** `feat/e2-demo-funnel` (E1 merged as **#125** and **deployed live**; **#122** audit-evidence and **#123** benchmarks still open concurrently in sibling worktrees)
 **Purpose:** pick up Linchpin work in a fresh session without re-deriving context.
+
+## 2026-07-10 — E2 "funnel demo -> mini-reporte" shipped (same session as E1's merge + deploy)
+
+**E1 closed out first:** PR #125 squash-merged to `main` (`00e6ba6`) and
+deployed to Fly the same day — `https://linchpin.fly.dev/paquetes` verified
+live (all 7 one-pager slugs 200, landing CTAs present, 14 CTAs degrading to
+`mailto:` until the operator sets `CALENDLY_URL`/`STRIPE_LINK_*`, see
+`documentation/operator/07_setup_venta.md`).
+
+**E2 shipped on `feat/e2-demo-funnel`:** `/demo` no longer returns reorder
+points — it now sells what the Diagnostico opens with. New
+`webapp/demo_scan.py`: ONE stock CSV (`product_id, on_hand, daily_demand`
+[+ `unit_cost`, `days_since_last_sale`] — same shape as the acquisition
+playbook's free-scan template on the unmerged
+`feat/client-acquisition-playbook` branch, deliberately compatible) →
+reuses the three existing jobs' `prepare/run/verify` AS-IS (no delivery
+phase): `excess_obsolete` directly, `abc_xyz` via one annualized demand
+point per SKU (XYZ is degenerate on a snapshot — documented in the module;
+only the ABC axis is quoted), `financial_kpis` via run-rate COGS + on-hand
+inventory value (DIO/turns follow). New `POST /api/demo-scan` (public like
+`/api/leads`, rate-limited, upload controls copied from `/api/jobs` —
+25 MB/413, basename pinning, isolated tempdir, TTL purge — SECURITY.md
+threat model now lists it as the 4th untrusted input). Headline: "$X
+atrapados en stock muerto/excedente · A-items concentran Y% · DIO Z dias" +
+3 hallazgos ejecutivos + CTA a `/paquetes/diagnostico-arranque`. The QA
+gate holds at scan level: any of the three `verify()`s failing (or a
+non-finite headline number, e.g. all-zero demand → DIO=inf, or missing
+`unit_cost` → zero inventory value) ⇒ `qa_failed`, NO artifact written,
+honest message in the UI. On QA pass it persists per lead:
+`deliverables/leads/<safe-email>/mini_report.md` + `followup_email_draft.md`
+(a DRAFT — mail is NEVER sent automatically) — email → dirname via
+`safe_lead_dirname()` (traversal-proof, `_at_` for `@`, plus a short hash
+of the full normalized email so two distinct addresses can never collide
+into the same directory — an earlier version without the hash suffix DID
+collide, e.g. `user+test@gmail.com` vs `user_test@gmail.com`; caught by an
+adversarial review before merge), root overridable via
+`LINCHPIN_LEAD_REPORTS_DIR` (on Fly set it to a path on the `/data`
+volume or artifacts die with each deploy). A telemetry line is ALWAYS
+appended to `leads.jsonl` (`source: "demo-scan"`, dataset, status,
+headline-or-null) — deliberately including `qa_failed` runs, so E8's
+`/api/metrics` can count demos-run vs demos-converted later. New tracked
+sample `data/sample_stock_snapshot.csv` (8 SKUs, same rows as the free-scan
+demo) + downloadable `webapp/static/demo/plantilla_stock.csv`; the demo UI
+was rewritten in neutral Spanish (no voseo, per the 2.0 protocol's copy
+rule) around the money headline + CTA. The raw upload is never copied into
+the lead folder (privacy: derived teaser persists, raw data purges).
+
+**Adversarial review before merge, worth reading if the pattern repeats:**
+the review workflow's verify phase hit the session's usage-limit reset
+mid-run — 11 of 13 agents errored (`session limit · resets 1:50pm`), so the
+tool's own `confirmed: []` output was NOT a clean pass, it was an infra
+outage (same failure shape as [[workflow-verify-phase-failure-not-clean]]
+from a prior session). Manually adjudicated all 9 raw findings instead of
+trusting the empty list. 2 were real code bugs, fixed: (1) `safe_lead_dirname`
+collisions (above); (2) attacker-controlled `product_id` landing unescaped
+in the persisted `.md` artifacts (`webapp/demo_scan.py::_md_safe` now
+collapses it to a conservative charset before embedding — the repo's
+existing `defuse_formula()` only covers CSV/Excel formula injection, not
+markdown/HTML). 1 was a real HIGH-severity gap addressed with a bounded
+mitigation, not a full fix: `/api/demo-scan` is unauthenticated with
+`LINCHPIN_RATE_LIMIT` off by default, so an unbounded lead store is a
+scriptable disk-exhaustion vector on the small Fly volume — added
+`_prune_excess_lead_dirs()` (oldest-evicted count cap, `MAX_LEAD_DIRS=5000`)
+as defense-in-depth and flagged setting the real rate limit in the launch
+checklist; a full fix (auth, CAPTCHA, per-IP quota) was judged
+disproportionate for a deliberately-public lead magnet. The remaining 6
+were test-coverage gaps, not code bugs — closed by adding tests, not by
+changing behavior (rate-limit regression test, re-scan-same-email overwrite
+semantics, non-CSV upload stays a 400 not a 500, duplicate-`product_id`
+row-summing pinned to match every other job's existing behavior, the
+`LINCHPIN_LEAD_REPORTS_DIR` env var exercised via a real subprocess import
+instead of only via monkeypatch, and an explicit assertion that the raw
+upload is never copied into the lead folder).
+
+**Next: E3 (Oferta #8 "Sprint de Liquidación").** `markdown_liquidation`
+exists as a registered tool (PR #124) but belongs to no package. E3 = new
+`LIQUIDACION` PackageSpec (data_quality, excess_obsolete,
+markdown_liquidation, pricing opcional) + `src/contingent_fee.py` (10-20%
+of recovered cash, floor default $1,500) + `--measure` mode + one-pager
+`documentation/paquetes/sprint-liquidacion.md`. Full acceptance criteria in
+the Linchpin 2.0 protocol.
 
 ## 2026-07-09 — Linchpin 2.0 kicks off: E1 "superficie de venta" shipped (`/paquetes`)
 
