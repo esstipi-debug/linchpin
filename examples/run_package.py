@@ -11,6 +11,9 @@ one consolidated deck + every tool's own deliverable.
     # full demo on synthetic data (no client files needed)
     python examples/run_package.py --package growth --demo
 
+    # bilingual deck (see src/i18n.py) -- default is the client's profile, else "es"
+    python examples/run_package.py --package diagnostico --demo --lang en
+
 Packages (scope/price: documentation/MONETIZATION_BRIEF.md + documentation/paquetes/):
 diagnostico (4 tools, sprint) | starter (8 tools, mensual) | growth (26 tools, mensual+QBR) |
 scale (35 tools, quincenal+S&OP mensual) | retainer_ejecutivo (same 35, distinta cadencia) |
@@ -20,6 +23,7 @@ proyecto_red_almacen (6 tools, proyecto unico) | proyecto_sourcing (3 tools, pro
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 from datetime import date, timedelta
 from pathlib import Path
@@ -29,6 +33,7 @@ import pandas as pd
 
 from scm_agent.package_specs import PACKAGES, get_package
 from scm_agent.packages import PackageSpec, missing_required_inputs, run_package
+from src import client_profile
 
 # ---------------------------------------------------------------------------
 # Demo intake: deterministic synthetic files exercising every input slot.
@@ -458,6 +463,26 @@ def print_checklist(spec: PackageSpec) -> None:
         print(f"  - {step.tool_key} ({req}; {step.cadence})")
 
 
+def _resolve_lang(
+    client: str, cli_lang: str | None, root: Path | str = client_profile.DEFAULT_CLIENTS_ROOT,
+) -> str:
+    """CLI override > the client's stored profile.lang > the package default ("es").
+
+    Mirrors scm_agent/packages.py::_load_profile's error-handling split: an
+    unslugifiable client label legitimately means "no profile" (degrade to
+    the default), but a CORRUPT profile.json is a real data-integrity problem
+    and must fail loudly, not silently default the language and mask it.
+    """
+    if cli_lang is not None:
+        return cli_lang
+    try:
+        slug = client_profile.slugify_client_id(client)
+    except ValueError:
+        return "es"
+    profile = client_profile.load_profile(slug, root=root)
+    return profile.lang if profile is not None else "es"
+
+
 def _print_result(result) -> None:
     print(f"status: {result.status}")
     print(result.summary)
@@ -492,12 +517,16 @@ def main() -> None:
     parser.add_argument("--checklist", action="store_true",
                         help="print the client intake checklist and exit")
     parser.add_argument("--strict-params", action="store_true")
+    parser.add_argument("--lang", choices=("es", "en"), default=None,
+                        help="deck language (default: the client's profile, or 'es')")
     args = parser.parse_args()
 
     spec = get_package(args.package)
     if args.checklist:
         print_checklist(spec)
         return
+
+    spec = dataclasses.replace(spec, lang=_resolve_lang(args.client, args.lang))
 
     params: dict = {}
     if args.params:
