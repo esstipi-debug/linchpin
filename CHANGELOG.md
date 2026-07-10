@@ -3,6 +3,18 @@
 ## [Unreleased]
 
 ### Added
+- **`/console` API key field (fixes a live production bug)** — `LINCHPIN_API_KEY` is set on
+  the production deploy, but the agent console (`webapp/static/prototype/index.html`) had no
+  UI field to supply `X-API-Key`, so every visitor hit a bare 401 with no explanation. Added
+  a masked API-key input (remembered in `localStorage` so an operator doesn't retype it every
+  visit), wired into the `POST /api/jobs` request header, and a clear error message
+  ("API key invalida o faltante...") instead of the empty, confusing result panel a 401
+  previously produced (FastAPI's `{"detail": "..."}` body has no `status`/`summary` field, so
+  it silently rendered a "bad" chip with a blank summary). Non-401 error responses now also
+  surface `data.detail` instead of the same blank panel. Verified live end-to-end (gate off
+  and gate on, missing/wrong/correct key, reload persistence) — caught and fixed a real bug
+  along the way where the new `oninput` handler wasn't wired into `renderVals()`, so it
+  silently never fired despite being correctly attached as a React prop.
 - **Financial-threshold escalation + unvalidated-forecast disclosure** — the two writeback
   tools (`odoo_replenishment`, `excel_replenishment`) no longer present a restock plan as
   freely-actionable "options" regardless of size: `src/escalation.py` gains
