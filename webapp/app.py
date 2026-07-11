@@ -21,7 +21,7 @@ import sys
 import tempfile
 import time
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 # Make `src` importable no matter where uvicorn is launched from.
@@ -488,10 +488,11 @@ def _run_job_sync(
     file_bytes: bytes | None,
 ) -> dict:
     """The blocking half of /api/jobs: temp-dir staging, Orchestrator.run(), and
-    building the download-URL map. Offloaded via asyncio.to_thread (see api_jobs
-    below) so a real analysis (pandas/Excel work, CPU-bound) never blocks the
-    event loop - with WEB_CONCURRENCY=1 in production, running this inline used
-    to stall every other request, including /api/health, for the run's duration.
+    building the response dict (download-URL map + the serialized `guided`
+    outcome). Offloaded via asyncio.to_thread (see api_jobs below) so a real
+    analysis (pandas/Excel work, CPU-bound) never blocks the event loop - with
+    WEB_CONCURRENCY=1 in production, running this inline used to stall every
+    other request, including /api/health, for the run's duration.
 
     ``safe_filename`` is already basename-validated by _safe_upload_basename
     (called from the async handler) — the containment check below is
@@ -537,6 +538,13 @@ def _run_job_sync(
         "clarifications": result.clarifications,
         "citations": result.citations,
         "kb_warnings": result.kb_warnings,
+        # The never-unprotected contract, machine-readable: ranked options, a
+        # prepared handoff, or an escalation (route_to/sla/reason) - whichever
+        # the tool produced. Orchestrator.run() always attaches one (falling
+        # back to a generic one derived from `status` when a tool supplies
+        # none), so this is never null for a real orchestrator result. Frozen
+        # dataclasses all the way down (src/guided.py) -> plain, JSON-safe dicts.
+        "guided": asdict(result.guided) if result.guided is not None else None,
     }
 
 

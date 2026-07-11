@@ -2,6 +2,36 @@
 
 ## [Unreleased]
 
+### Added
+- **`POST /api/jobs` exposes the `guided` outcome** — the orchestrator's never-unprotected
+  contract (`GuidedOutcome` from `src/guided.py`: ranked OPTIONS, a HANDOFF packet, or an
+  ESCALATED route/SLA/reason) was computed on every run but never left `webapp/app.py` — an
+  API/UI caller had no structured way to know "this needs a choice," "this needs a data
+  file," or "this is gated behind a finance approver," short of parsing free-text
+  `summary`/`clarifications` strings. Now serialized under `"guided"` via
+  `dataclasses.asdict()` (the whole `GuidedOutcome`/`ExecutionOption`/`HandoffPacket`/
+  `EscalationPacket`/`Residual` chain is frozen dataclasses with only JSON-primitive
+  fields, so this is a lossless, zero-custom-code mapping). +3 tests covering the OPTIONS,
+  HANDOFF, and ESCALATED shapes end-to-end through the real endpoint (the ESCALATED case
+  reuses the financial-threshold-escalation feature, proving the two features compose
+  correctly). An adversarial review caught a real, if narrow, gap this exposure newly makes
+  reachable: `src/guided.py::verify_guided()` — the ONE shared QA gate every tool's
+  `verify()` calls — never checked `ExecutionOption.score` for finiteness, so a non-finite
+  score (`NaN`/`Infinity`, possible from an unguarded CSV `float()` conversion) could reach
+  `webapp/app.py`'s `SafeJSONResponse` (`allow_nan=False`) and turn a would-be `200` into an
+  unhandled `500`. Verified empirically that the one cited scenario (`jobs/risk_job.py`) was
+  already caught incidentally by its own `total_emv` finiteness check — but the general gap
+  was real, since nothing guaranteed every tool's aggregate check would catch it. Fixed at
+  the shared gate (checks both `outcome.options` and the nested `outcome.escalation.options`)
+  so all 37 tools are protected uniformly, with +4 dedicated tests. 1733 tests green (full
+  suite, confirming the shared-gate change breaks no existing tool), ruff clean. Known,
+  deliberately out-of-scope follow-ups from the review: `webapp/mcp_server.py`'s parallel
+  `/mcp` response does not yet expose the same `guided` signal for MCP-only callers; and an
+  anonymous caller on a deploy with `LINCHPIN_API_KEY` unset (the shipped default) now sees
+  `guided.handoffs[].artifact`/`.data` and `guided.escalation.recommendation` verbatim —
+  confirmed harmless today (no currently-wired tool populates real content there) but worth
+  remembering if a future tool starts putting sensitive drafts in those fields.
+
 ### Fixed
 - **`POST /api/jobs` no longer blocks the event loop** — the orchestrator run (CPU-bound
   pandas/Excel/report generation, up to several seconds) used to execute synchronously
