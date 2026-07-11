@@ -348,3 +348,64 @@ def test_jobs_response_includes_citations_key():
     })
     assert r.status_code == 200
     assert "citations" in r.json()  # L3 grounding key is always present
+
+
+# -- guided: the never-unprotected contract, exposed to every /api/jobs caller ---
+#
+# Previously invisible: JobResult.guided (src/guided.py's GuidedOutcome) was
+# computed by every orchestrator run but never left webapp/app.py - an API/UI
+# caller had no structured way to know "this needs a ranked choice", "this is
+# gated behind a finance approver", or "this needs a data file", short of
+# parsing the free-text `summary`/`clarifications` strings. Now serialized via
+# dataclasses.asdict (src/guided.py's dataclasses are frozen + JSON-plain, so
+# this is a lossless, zero-custom-code mapping) under the "guided" key.
+
+
+@requires_multipart
+def test_jobs_response_guided_options_for_a_ranked_choice():
+    r = client.post("/api/jobs", data={
+        "brief": "evaluate leadership", "job_type": "leadership_chain",
+        "params": '{"scores": "3 3 3 3 3"}',
+    })
+    assert r.status_code == 200
+    guided = r.json()["guided"]
+    assert guided is not None
+    assert guided["status"] == "options"
+    assert len(guided["options"]) >= 2
+    assert sum(1 for o in guided["options"] if o["recommended"]) == 1
+    assert guided["handoffs"] == [] and guided["escalation"] is None
+
+
+@requires_multipart
+def test_jobs_response_guided_handoff_for_needs_data():
+    r = client.post("/api/jobs", data={"brief": "set up reorder points"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "needs_data"
+    guided = body["guided"]
+    assert guided is not None
+    assert guided["status"] == "handoff"
+    assert len(guided["handoffs"]) >= 1
+    assert guided["handoffs"][0]["risk_if_skipped"]  # never a bare/empty risk statement
+
+
+@requires_multipart
+def test_jobs_response_guided_escalation_for_an_over_threshold_restock():
+    """odoo_replenishment's demo stand-in restocks ~$916 by default (see
+    tests/test_connector_odoo_tool.py) - a low financial_threshold forces the
+    ESCALATED path, and the API caller must see route_to/sla/reason, not just
+    a generic 'ok' with no signal that finance sign-off is required."""
+    r = client.post("/api/jobs", data={
+        "brief": "connect odoo and plan replenishment from odoo",
+        "job_type": "odoo_replenishment",
+        "params": '{"financial_threshold": 500}',
+    })
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "ok"  # STATUS_OK at the JobResult level...
+    guided = body["guided"]
+    assert guided["status"] == "escalated"  # ...but the guided contract says otherwise
+    esc = guided["escalation"]
+    assert esc["route_to"] and esc["sla"] and esc["reason"]
+    assert len(esc["options"]) >= 2  # the ranked choices travel WITH the escalation
+    assert guided["options"] == esc["options"]  # ...and stay visible at the top level too
