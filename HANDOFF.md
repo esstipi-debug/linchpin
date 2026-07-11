@@ -1,44 +1,69 @@
 # Linchpin — Session Handoff
 
-**Date:** 2026-07-10 · **Repo:** `esstipi-debug/linchpin` (private) · **Branch:** `feat/e5-citation-gate` (pushed, NOT a PR yet — see the section right below before doing anything else). E1 **#125**, E2 **#128**, E3 **#129**, E4 **#131** all merged to `main`; E1-E4 deployed live and verified on `https://linchpin.fly.dev`. **#122** audit-evidence, **#123** benchmarks, and a `docs/refresh-stale-counts`-style worktree still open concurrently; **#132**/**#133** (unrelated fixes from concurrent sessions) already merged into `main` and picked up by `feat/e5-citation-gate` via a clean merge.
+**Date:** 2026-07-10 · **Repo:** `esstipi-debug/linchpin` (private) · **Branch:** `feat/e5-citation-gate`, **PR #134 open as draft** (adversarially reviewed and fixed — waiting on the operator's explicit go-ahead to merge, per this repo's standing rule of never merging proactively). E1 **#125**, E2 **#128**, E3 **#129**, E4 **#131** all merged to `main`; E1-E4 deployed live and verified on `https://linchpin.fly.dev`. **#122** audit-evidence, **#123** benchmarks, and a `docs/refresh-stale-counts`-style worktree still open concurrently; **#132**/**#133** (unrelated fixes from concurrent sessions) already merged into `main` and picked up by `feat/e5-citation-gate` via a clean merge.
 **Purpose:** pick up Linchpin work in a fresh session without re-deriving context.
 
-## 2026-07-10 — E5 "citation-grounding gate" — CODE DONE, REVIEW NOT ADJUDICATED, NO PR YET
+## 2026-07-10 — E5 "citation-grounding gate" — reviewed, fixed, PR #134 open (draft) — needs merge go-ahead
 
-**Read this section first if you're picking up cold.** The branch
-`feat/e5-citation-gate` is pushed to origin with a **WIP checkpoint commit**
-(not a finished, PR-ready commit — see its own message). The implementation
-is complete, tested, and verified live; what's NOT done is: adjudicating an
-adversarial review that was still running when this session ended, applying
-any confirmed fixes, writing the final polished commit + PR description, and
-opening the PR. **Do this before anything else if you're continuing E5:**
+**Read this section first if you're picking up cold.** E5 is code-complete,
+adversarially reviewed, all confirmed findings fixed, full suite green
+(1780 passed, 3 skipped, ruff clean), and **PR #134 is open as a draft**.
+Nothing is blocking except the operator's explicit "mergea el PR #134" —
+do not merge it proactively. If the operator gives that instruction: merge,
+then deploy to Fly (`~/.fly/bin/flyctl.exe deploy --app linchpin` from a
+detached worktree at `origin/main`) and verify live via curl, then clean up
+this worktree/branch (`git worktree remove`, PowerShell force-delete
+fallback if Windows-locked, `git worktree prune`), then start E6.
 
-1. `cd` into a fresh worktree on `feat/e5-citation-gate` (or reuse
-   `.wt-e5-citation-gate` if it still exists — check `git worktree list`
-   first; if it's gone, `git worktree add /path feat/e5-citation-gate`).
-2. **Run a FRESH adversarial review** — do not try to resume the prior one.
-   `Workflow`'s `resumeFromRunId` is explicitly session-scoped
-   (`wf_cb14d33f-f49` / background task `w347mgmu0`, launched this session,
-   is not reachable from a new one). Re-run the same 3-dimension pattern
-   used for E2/E3/E4/E5 (grep this file's own prior entries for the exact
-   phrasing, or re-derive: one dimension on the new BFS/graph-algorithm
-   correctness in `scm_agent/knowledge.py`, one auditing the 37-tool
-   `TOOL_CONCEPTS` curation quality in `scm_agent/citation_gate.py` — not
-   just "does the id exist" but "is it topically right" — and one on the
-   `scm_agent/packages.py` integration + degrade-to-empty semantics).
-3. Adjudicate findings the same way every prior épica did in this repo:
-   manually re-verify each "confirmed" finding against the real code before
-   trusting it (and manually adjudicate raw findings yourself if the
-   verify phase errors out/hits a session limit — see the E2 and E3 entries
-   below for exactly that failure mode and how it was handled).
-4. Apply real fixes, re-run `pytest tests/ -q` (1757 passed as of this
-   checkpoint, ruff clean) and the full ruff scope, THEN write the real
-   commit (the current HEAD is a checkpoint commit, not this) and open the
-   PR — same pattern as E1-E4's own PRs.
-5. Update this HANDOFF.md section to reflect "PR #N opened" once done —
-   replace this whole section, don't just append.
+An earlier checkpoint of this session (mid-context-handoff) noted the
+adversarial review workflow (`wf_cb14d33f-f49` / task `w347mgmu0`) hadn't
+finished and couldn't be resumed cross-session. **It turned out to still be
+running in the background and completed on its own** — a task-completion
+notification arrived carrying the full result in a *later* session/turn, so
+it never needed re-running from scratch. Lesson for next time: a workflow
+launched via the `Workflow` tool keeps running server-side even if the
+session that launched it ends before it finishes; check for a pending
+notification before assuming a fresh review is required.
 
-### What's actually built (verified working, just not adversarially reviewed)
+### What the review found and how it was adjudicated
+
+3 dimensions (graph-algorithm correctness in `knowledge.py`; `TOOL_CONCEPTS`
+curation quality across a sample of tools; integration/degrade-semantics in
+`packages.py`), each finding independently re-verified by a second agent
+against the real code and real committed graph (not the diff description).
+12 raw findings, 7 confirmed, 5 refuted as having no live behavioral impact
+(don't "fix" these if you see them flagged again — they were already
+investigated and are working as intended):
+- `vehicle_routing`'s anchor imprecision (`route_sheet` is a manufacturing
+  routing doc, not vehicle routing) — real, but `vehicle_routing` isn't
+  wired into any `PackageSpec` yet, so `citation_gate` never runs for it in
+  production today. Worth fixing *before* it's ever added to a package.
+- `fefo`'s third anchor (`lot_size`, an EOQ/batch-sizing concept) — its
+  entire 2-hop reach is a strict subset of the other two (correct) anchors',
+  so it changes zero outcomes; redundant but harmless.
+- `sourcing`'s three anchors are about sourcing *location* (make-vs-buy),
+  not the supplier-scorecard/TOPSIS ranking the tool implements — but the
+  procurement sub-graph is tightly clustered enough that a corrected anchor
+  set produces identical keep/omit outcomes on every candidate tested.
+- `leadership_chain`'s anchors and the module's "every id verified to
+  exist" docstring claim — both independently reconfirmed correct, not
+  disputed.
+- `filter_citations` hardcodes `graph="books"` instead of reading
+  `GroundedCitation.graph` — mechanically true, but `graph="code"` citations
+  are structurally unproducible by the current `ground_citations_detailed`
+  (it never queries the code graph), so there's no reachable input that
+  diverges. A one-line forward-compat nit if `ground_citations_detailed` is
+  ever extended to surface code-graph hits — not a defect today.
+
+The 7 confirmed findings (bare-id collision risk in `knowledge.py`;
+mismatched `scheduling`/`forecast`/`cycle_count`/`risk` anchors;
+`excess_obsolete`'s citation-gate self-validation loophole; `data_quality`'s
+accepted coverage gap) are described in the fix commit's own message
+(`git log -1 feat/e5-citation-gate` or the PR description) — read that
+before touching `citation_gate.py`'s `TOOL_CONCEPTS`/`EXCLUDED_CONCEPTS`
+again, it explains *why* each anchor is what it is, not just what changed.
+
+### What's actually built
 
 The gap this closes, straight from the 2.0 protocol: "el grounding actual
 es decorativo (el deck demo cita 'Clean Technology'/MPS en data quality)."
@@ -90,14 +115,15 @@ Confirmed this was real and is now fixed — see below.
   ATO-MPS — the exact citations named in the protocol as the bug) are all
   correctly omitted as >2 hops from `step_product_data_standard`, degrading
   that step to zero citations; `abc_xyz`/`excess_obsolete`/`financial_kpis`
-  keep their genuinely on-topic citations unchanged.
-- 60 new/changed tests across `tests/test_citation_gate.py` (new — unit
-  tests against a fake KnowledgeBase, plus the protocol's own named
+  keep their genuinely on-topic citations (post-review-fix content).
+- 70+ new/changed tests across `tests/test_citation_gate.py` (unit tests
+  against a fake KnowledgeBase, per-anchor connectivity regression tests
+  from the review's confirmed findings, plus the protocol's own named
   regression test that "Clean Technology"/MPS never cite again on the
-  Diagnostico demo), `tests/test_knowledge.py` (the new public methods),
-  and two `_NoKnowledge` test stubs (`test_packages.py`,
-  `test_run_package_cli.py`) that needed a `ground_citations_detailed` stub
-  method added or every package test broke.
+  Diagnostico demo), `tests/test_knowledge.py` (the new public methods +
+  the bare-id-collision disambiguation regression), and two `_NoKnowledge`
+  test stubs (`test_packages.py`, `test_run_package_cli.py`) that needed a
+  `ground_citations_detailed` stub method added or every package test broke.
 
 ### A mistake worth knowing about if you touch tests/test_knowledge.py again
 
