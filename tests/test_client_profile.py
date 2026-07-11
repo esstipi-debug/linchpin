@@ -289,6 +289,21 @@ def test_load_profile_raises_clear_error_on_missing_required_key(tmp_path):
         load_profile("acme", root=tmp_path)
 
 
+def test_load_profile_raises_clear_error_on_null_branding_name(tmp_path):
+    # Branding's own __post_init__ used to raise a raw AttributeError for a
+    # None name, which load_profile's except clause couldn't catch - it must
+    # surface as the same clean, wrapped "corrupt client profile" error as
+    # every other malformed field.
+    bad = tmp_path / "acme"
+    bad.mkdir(parents=True)
+    (bad / "profile.json").write_text(
+        '{"client_id": "acme", "display_name": "Acme", "branding": {"name": null}}',
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="corrupt client profile"):
+        load_profile("acme", root=tmp_path)
+
+
 # ---- atomic save (no partial file left behind on success) ------------------------
 
 def test_save_profile_leaves_no_leftover_temp_files(tmp_path):

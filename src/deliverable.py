@@ -18,6 +18,7 @@ the prepared date is passed in, never read from the clock, so output is testable
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -26,13 +27,23 @@ from src import i18n
 _HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
 
+def _visible(text: str) -> str:
+    """``text`` with Unicode format characters (category "Cf" - zero-width
+    space/joiner/word-joiner, the BOM, etc.) stripped, so a name made only of
+    invisible characters doesn't pass a truthiness/``.strip()`` check."""
+    return "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
+
+
 @dataclass(frozen=True)
 class Branding:
     """The identity a deck is presented under - who a client sees as having
     prepared their deliverable. Defaults to Linchpin's own (``DEFAULT_BRANDING``
     below); a partner reselling under the white-label/rev-share model (E6)
-    supplies their own via ``ClientProfile.branding`` (``src/client_profile.py``)
-    so every deck built for THAT client carries their identity instead.
+    supplies their own via ``ClientProfile.branding`` (``src/client_profile.py``).
+    Scope: only the CONSOLIDATED package deck (``jobs/package_deliverable.py``)
+    resolves and threads a client's custom branding in today - each individual
+    tool's own deck in a package run, and the single-tool Orchestrator path,
+    keep rendering this default (see ``scm_agent/packages.py``'s own docstring).
 
     ``logo_url``/``primary_color`` are referenced, never fetched: ``to_markdown``
     emits a Markdown image tag a viewer resolves client-side, and ``to_excel``
@@ -40,7 +51,10 @@ class Branding:
     rendering a deck, keeping it pure/deterministic (see the module docstring)
     and avoiding a server-side fetch of a partner-supplied URL. ``primary_color``
     is stored for a future richer (HTML/PDF) renderer; the current Markdown/XLSX
-    decks don't apply it visually yet.
+    decks don't apply it visually yet. A non-ASCII ``name`` renders fine in the
+    UTF-8 files ``write_all`` produces, but breaks ``to_markdown``'s own
+    ASCII/cp1252 console-print guarantee if a caller prints its return value
+    directly (no current call site does - decks are always written to file).
     """
 
     name: str
@@ -48,9 +62,9 @@ class Branding:
     primary_color: str | None = None  # "#RRGGBB"
 
     def __post_init__(self) -> None:
-        if not self.name.strip():
+        if not isinstance(self.name, str) or not _visible(self.name).strip():
             raise ValueError("branding.name is required")
-        if self.primary_color is not None and not _HEX_COLOR_RE.match(self.primary_color):
+        if self.primary_color is not None and not _HEX_COLOR_RE.fullmatch(self.primary_color):
             raise ValueError(f"branding.primary_color must be '#RRGGBB', got {self.primary_color!r}")
 
 
@@ -207,7 +221,7 @@ class Deliverable:
             ws.append([L("hdr_prepared_field"), self.prepared])
         if self.confidence is not None:
             ws.append([L("hdr_confidence_field"), f"{self.confidence * 100:.0f}%"])
-        ws.append([L("footer_prepared_by"), self.branding.name])
+        ws.append([L("branding_name_field"), self.branding.name])
         if self.branding.logo_url:
             ws.append([L("branding_logo_field"), self.branding.logo_url])
         ws.append([])

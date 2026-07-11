@@ -81,11 +81,35 @@ def test_branding_requires_a_name():
         Branding(name="  ")
 
 
+def test_branding_none_name_raises_valueerror_not_a_raw_attributeerror():
+    # A hand-edited/corrupt profile.json can carry `"branding": {"name": null}`
+    # - it must fail the same clean ValueError as every other invalid input,
+    # not an unwrapped AttributeError client_profile.load_profile can't catch.
+    with pytest.raises(ValueError, match="name"):
+        Branding(name=None)
+
+
+def test_branding_name_made_only_of_zero_width_characters_is_rejected():
+    # ZERO WIDTH SPACE/JOINER/WORD JOINER/BOM are invisible but not
+    # `str.strip()`-whitespace - a name made only of these would otherwise
+    # pass validation and render as a silently blank "Prepared by " footer.
+    for invisible in ("​", "‍", "⁠", "﻿", "  ​  "):
+        with pytest.raises(ValueError, match="name"):
+            Branding(name=invisible)
+
+
 def test_branding_rejects_a_malformed_hex_color():
     with pytest.raises(ValueError, match="primary_color"):
         Branding(name="Acme", primary_color="blue")
     with pytest.raises(ValueError, match="primary_color"):
         Branding(name="Acme", primary_color="#12")
+
+
+def test_branding_rejects_a_hex_color_with_a_trailing_newline():
+    # re.match's unanchored `$` matches just before a trailing "\n" too -
+    # fullmatch (or a \Z anchor) is required to genuinely enforce '#RRGGBB'.
+    with pytest.raises(ValueError, match="primary_color"):
+        Branding(name="Acme", primary_color="#AABBCC\n")
 
 
 def test_branding_accepts_a_well_formed_hex_color():
@@ -126,7 +150,9 @@ def test_deliverable_excel_summary_sheet_shows_branding(tmp_path):
                     branding=Branding(name="Acme", logo_url="https://acme.example/logo.png"))
     wb = load_workbook(d.to_excel(tmp_path / "d.xlsx"))
     rows = [tuple(r) for r in wb["Summary"].iter_rows(values_only=True)]
-    assert ("Prepared by", "Acme") in rows
+    # A distinct label from "Prepared" (the date row) so the two rows -
+    # a date vs. a company name - aren't confusable when skimming column A.
+    assert ("Brand", "Acme") in rows
     assert ("Logo", "https://acme.example/logo.png") in rows
 
 

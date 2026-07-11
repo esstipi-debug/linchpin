@@ -72,10 +72,20 @@
       [partner-odoo.md](../paquetes/partner-odoo.md#cómo-se-aplica-tu-marca-branding)).
       Sin esto, sus decks salen con la marca Linchpin por defecto — no rompe
       nada, pero no es lo pactado.
-- [ ] Rutina operativa: la primera corrida de un partner nuevo, revisar el
-      deck generado (`.md` y `.xlsx` del paquete consolidado) antes de que se
-      lo pase a su cliente — confirmar que el logo (si configuró uno) resuelve
-      bien y que el pie dice su marca, no "Linchpin".
+- [ ] **Alcance actual — leelo antes de entregar nada:** solo el documento
+      ejecutivo consolidado del paquete lleva la marca del partner hoy. El
+      reporte propio de cada herramienta individual dentro de la misma
+      carpeta (`data_quality/`, `abc_xyz/`, etc.) todavía sale con la marca
+      Linchpin por defecto — whitelabelearlos también es una mejora
+      pendiente, no construida todavía. Si el partner va a entregarle la
+      carpeta completa a su cliente, aclaraselo de antemano o entregale
+      solamente el documento consolidado.
+- [ ] Rutina operativa: la primera corrida de un partner nuevo, revisar
+      **todos** los archivos que le vas a entregar (no solo el paquete
+      consolidado) antes de que el partner se los pase a su cliente —
+      confirmar que el consolidado dice su marca y decidir con el partner
+      qué hacer con los reportes individuales que todavía dicen "Linchpin"
+      (ver el punto de arriba).
 
 ## Pendiente segun épicas futuras (se completa cuando esa épica aterrice)
 
