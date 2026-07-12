@@ -42,7 +42,7 @@ def _event(event_type: str, *, ts: datetime, dedup_key: str) -> Event:
 
 
 def test_build_digest_message_with_no_events():
-    assert build_digest_message([], window_hours=24.0) == "Linchpin daily digest: no events in the last 24h."
+    assert build_digest_message([], window_hours=24.0) == "Kern daily digest: no events in the last 24h."
 
 
 def test_build_digest_message_reports_the_exact_total_and_per_type_breakdown():
@@ -59,7 +59,7 @@ def test_build_digest_message_reports_the_exact_total_and_per_type_breakdown():
     message = build_digest_message(events, window_hours=24.0)
 
     assert message == (
-        "Linchpin daily digest: 6 event(s) in the last 24h.\n"
+        "Kern daily digest: 6 event(s) in the last 24h.\n"
         "  - dead_stock: 1\n"
         "  - excess: 2\n"
         "  - stock_below_rop: 3"
@@ -194,7 +194,7 @@ def test_daily_digest_job_func_is_exactly_run_daily_digest():
 
 def test_a_genuine_digest_result_passes_qa():
     result = DigestResult(
-        message="Linchpin daily digest: 2 event(s) in the last 24h.\n  - excess: 2",
+        message="Kern daily digest: 2 event(s) in the last 24h.\n  - excess: 2",
         event_count=2,
         counts_by_type={"excess": 2},
         notified=False,
@@ -205,7 +205,7 @@ def test_a_genuine_digest_result_passes_qa():
 
 def test_a_digest_whose_counts_do_not_sum_to_the_total_fails_qa():
     fabricated = DigestResult(
-        message="Linchpin daily digest: 5 event(s) in the last 24h.\n  - excess: 2",
+        message="Kern daily digest: 5 event(s) in the last 24h.\n  - excess: 2",
         event_count=5,  # claims 5, but counts_by_type only accounts for 2
         counts_by_type={"excess": 2},
         notified=False,

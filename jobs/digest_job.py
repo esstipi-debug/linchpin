@@ -59,10 +59,10 @@ def build_digest_message(events: list[Event], *, window_hours: float) -> str:
     """Plain-text digest body. ASCII-only (Windows cp1252 console convention --
     no em dashes or curly quotes), so it is always safe to print directly."""
     if not events:
-        return f"Linchpin daily digest: no events in the last {window_hours:g}h."
+        return f"Kern daily digest: no events in the last {window_hours:g}h."
 
     counts = _counts_by_type(events)
-    lines = [f"Linchpin daily digest: {len(events)} event(s) in the last {window_hours:g}h."]
+    lines = [f"Kern daily digest: {len(events)} event(s) in the last {window_hours:g}h."]
     for event_type in sorted(counts):
         lines.append(f"  - {event_type}: {counts[event_type]}")
     return "\n".join(lines)

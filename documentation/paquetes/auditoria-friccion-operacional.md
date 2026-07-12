@@ -48,7 +48,7 @@ rotación):
 arriba es un *benchmark de industria*, no una *medición del cliente
 específico*. El entregable se presenta siempre como una **estimación con
 rango y supuestos explícitos** — nunca disfrazada de medición exacta. Esto
-es lo mismo que ya hace Linchpin en el resto del catálogo (todo número
+es lo mismo que ya hace Kern en el resto del catálogo (todo número
 citado + compuerta de QA), aplicado a un dominio donde la mayoría de
 proveedores no se molesta en distinguir estimar de medir.
 
@@ -92,7 +92,7 @@ agregada (solo trayectorias, nunca personas identificables). Esto es un
 **upsell de rigor**, no un requisito — no se construye antes de que un
 cliente real lo pida.
 
-## Engines de Linchpin que ya cubren esto
+## Engines de Kern que ya cubren esto
 
 `slotting` (COI + afinidad) · `queuing` (congestión/espera) ·
 `warehouse_layout` (distancias/pasillos/andenes) · `cost_to_serve` (costo
