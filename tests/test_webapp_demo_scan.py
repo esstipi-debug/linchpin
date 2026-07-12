@@ -169,6 +169,19 @@ def test_upload_traversal_filename_is_contained(isolated_stores, tmp_path):
     assert not (appmod.JOBS_OUTPUT_DIR.parent.parent / "evil.csv").exists()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="these characters are only OS-rejected on Windows")
+def test_filename_with_os_rejected_characters_is_a_clean_400_not_a_500(isolated_stores):
+    # os.path.basename() lets a Windows-illegal character (<>:"|?*) through
+    # unchanged - the actual filesystem write is what rejects it. Must
+    # surface as the same 400 as any other invalid filename, not crash.
+    r = client.post(
+        "/api/demo-scan",
+        data={"email": "bad-filename@x.com"},
+        files={"file": ("<script>alert(1)</script>.csv", GOOD_CSV.encode(), "text/csv")},
+    )
+    assert r.status_code == 400
+
+
 @pytest.mark.parametrize("bad", ["", "notanemail", "a@b", "@no.com"])
 def test_invalid_email_rejected(bad, isolated_stores):
     r = client.post("/api/demo-scan", data={"email": bad, "use_sample": "true"})

@@ -88,6 +88,19 @@ def test_response_never_contains_a_raw_email(isolated_leads):
     assert "secret-lead@example.com" not in client.get("/api/metrics").text
 
 
+def test_an_email_shaped_dataset_filename_is_sanitized_not_leaked_verbatim(isolated_leads):
+    # The "dataset" field is a caller-controlled upload filename (POST
+    # /api/demo-scan lets the lead name their own file) - regression for a
+    # real leak the adversarial review found: an upload literally named
+    # "victim@example.com.csv" landed verbatim as a by_dataset response key.
+    _write(isolated_leads, {"email": "a@example.com", "source": "demo-scan", "ts": "t1",
+                            "dataset": "victim@example.com.csv", "status": "ok"})
+    resp = client.get("/api/metrics")
+    assert "victim@example.com.csv" not in resp.text
+    assert "@" not in resp.text
+    assert resp.json()["demo_scan"]["by_dataset"] == {"victimexample.com.csv": 1}
+
+
 def test_a_malformed_line_is_skipped_not_a_crash(isolated_leads):
     isolated_leads.parent.mkdir(parents=True, exist_ok=True)
     with isolated_leads.open("a", encoding="utf-8") as handle:
@@ -96,6 +109,73 @@ def test_a_malformed_line_is_skipped_not_a_crash(isolated_leads):
         handle.write("\n")  # blank line, also tolerated
     body = client.get("/api/metrics").json()
     assert body["leads"]["total_captures"] == 1  # the malformed + blank lines don't count
+
+
+@pytest.mark.parametrize("bad_line", ['"just a string"', "42", '["a", "b"]', "null"])
+def test_a_syntactically_valid_but_non_object_line_is_skipped_not_a_crash(isolated_leads, bad_line):
+    # json.loads succeeds on these (so the old `except json.JSONDecodeError`
+    # alone let them through to `rec.get(...)`, which crashes on anything
+    # that isn't a dict) - regression for a real, reproduced 500.
+    isolated_leads.parent.mkdir(parents=True, exist_ok=True)
+    with isolated_leads.open("a", encoding="utf-8") as handle:
+        handle.write(bad_line + "\n")
+        handle.write(json.dumps({"email": "ok@example.com", "source": "demo", "ts": "t1"}) + "\n")
+    resp = client.get("/api/metrics")
+    assert resp.status_code == 200
+    assert resp.json()["leads"]["total_captures"] == 1
+
+
+def test_an_unhashable_source_or_status_value_is_skipped_not_a_crash(isolated_leads):
+    # A dict/list-valued "source" or "status" would crash a plain
+    # `by_source[source] = ...` dict-keying line (TypeError: unhashable
+    # type) - _metrics_label must reduce it to a safe string first.
+    _write(
+        isolated_leads,
+        {"email": "a@example.com", "source": ["nested", "list"], "ts": "t1"},
+        {"email": "b@example.com", "source": "demo-scan", "ts": "t2",
+         "dataset": "d.csv", "status": {"weird": "dict"}},
+    )
+    resp = client.get("/api/metrics")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["leads"]["total_captures"] == 2
+    assert body["leads"]["by_source"]["unknown"] == 1  # non-string source -> "unknown"
+
+
+def test_bucket_count_is_capped_and_overflow_folds_into_other(isolated_leads):
+    # POST /api/leads' "source" field is caller-controlled with no fixed
+    # enum - an attacker scripting distinct source values per request must
+    # not be able to grow the response's by_source dict without bound.
+    _write(isolated_leads, *[
+        {"email": f"lead{i}@example.com", "source": f"src-{i}", "ts": "t"}
+        for i in range(40)
+    ])
+    by_source = client.get("/api/metrics").json()["leads"]["by_source"]
+    assert len(by_source) == 26  # _METRICS_MAX_BUCKETS (25) distinct labels + "other"
+    assert by_source["other"] == 15  # the 15 that didn't fit
+
+
+def test_whitespace_variant_emails_dedupe_to_one_unique_count(isolated_leads):
+    _write(
+        isolated_leads,
+        {"email": "foo@example.com", "source": "demo", "ts": "t1"},
+        {"email": " foo@example.com", "source": "demo", "ts": "t2"},
+        {"email": "foo@example.com ", "source": "demo", "ts": "t3"},
+    )
+    body = client.get("/api/metrics").json()
+    assert body["leads"]["total_captures"] == 3
+    assert body["leads"]["unique_emails"] == 1
+
+
+def test_missing_source_or_status_falls_back_to_unknown(isolated_leads):
+    _write(
+        isolated_leads,
+        {"email": "a@example.com", "ts": "t1"},  # no "source" at all
+        {"email": "b@example.com", "source": "demo-scan", "ts": "t2", "dataset": "d.csv"},  # no "status"
+    )
+    body = client.get("/api/metrics").json()
+    assert body["leads"]["by_source"]["unknown"] == 1
+    assert body["demo_scan"]["by_status"]["unknown"] == 1
 
 
 def test_api_key_enforced_when_configured(monkeypatch, isolated_leads):

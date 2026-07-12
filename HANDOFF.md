@@ -63,24 +63,61 @@ the original notes somewhere and E8 needs revisiting.
   operational telemetry stream in the codebase — confirmed nothing else
   logs `run_package`/commercial-package activity anywhere) and returns
   aggregate counts only — total captures, unique emails (never the emails
-  themselves), a by-source breakdown (`demo` vs `demo-scan`), and for
-  `demo-scan` specifically, counts by status (`ok`/`qa_failed`) and by
-  dataset. Gated behind `Depends(security.require_api_key)` +
-  `Depends(security.rate_limit)`, the same pattern as `POST /api/jobs` —
-  a no-op when `LINCHPIN_API_KEY` is unset (the shipped default), so this
-  doesn't force auth in local/dev use, only once an operator deploying
-  publicly opts in. A malformed or blank line in `leads.jsonl` is skipped,
-  not a crash. `SECURITY.md` updated (the `LINCHPIN_API_KEY` table row and
-  a new "Controls enforced in code" row) to match.
+  themselves), a by-source breakdown, and for `demo-scan` specifically,
+  counts by status and by dataset. `source`/`status`/`dataset` are all
+  **caller-controlled** (a scripted `POST /api/leads`, or the filename a
+  lead's own upload happens to be named on `/api/demo-scan`) — an early
+  version of this endpoint echoed them as response keys unsanitized and
+  uncapped, which the adversarial review below caught as both a real PII
+  leak (an email-named upload landed verbatim in the response) and an
+  unbounded-growth vector. Fixed via `_metrics_label` (strips to a safe
+  character set, caps length) and `_metrics_bump` (caps distinct buckets,
+  folds overflow into `"other"`) — every bucket key in the response is now
+  provably sanitized and bounded, not just assumed safe because the two
+  current writers happen to behave. Gated behind
+  `Depends(security.require_api_key)` + `Depends(security.rate_limit)`,
+  the same pattern as `POST /api/jobs` — a no-op when `LINCHPIN_API_KEY`
+  is unset (the shipped default), so this doesn't force auth in local/dev
+  use, only once an operator deploying publicly opts in. A malformed
+  line, or a syntactically-valid-JSON line that isn't an object (e.g. a
+  hand-edited `leads.jsonl` with a bare string/number/list on one line),
+  is skipped, not a crash — an earlier version only guarded
+  `json.JSONDecodeError` and crashed (permanently, since `leads.jsonl` is
+  append-only with no rotation) on the second case. `SECURITY.md` updated
+  (the `LINCHPIN_API_KEY` table row, the "Controls enforced in code" row,
+  and the regression-tested-in paragraph) to match.
 - **The `PIPELINE.md` priority rule**, moved into this file's own
   standing header (see above) rather than living only in the checklist,
   which a fresh session might not read at all. The checklist's own
   section was shortened to point back here as the source of truth, so the
   rule text doesn't drift out of sync between two copies.
-- 8 new tests (`tests/test_webapp_metrics.py`), matching the house style
+- Test suite for `tests/test_webapp_metrics.py`, matching the house style
   from `tests/test_webapp_security.py`/`tests/test_webapp_demo_scan.py`
-  (isolated `LEADS_FILE` fixture, API-key/rate-limit dependency tests,
-  an explicit "never a raw email in the response body" assertion).
+  (isolated `LEADS_FILE` fixture, API-key/rate-limit dependency tests, an
+  explicit "never a raw email in the response body" assertion, malformed-
+  AND wrong-shaped-JSON-line tolerance, label-sanitization/bucket-cap
+  coverage, and the `"unknown"` fallback branches).
+
+### Known limitation, deferred rather than fixed
+
+`GET /api/metrics` reads and parses the ENTIRE `leads.jsonl` file on every
+single call (`LEADS_FILE.read_text().splitlines()`, no caching, no
+pagination) — benchmarked at ~0.9s for 500K lines (~60 MB). Organic growth
+alone would take decades to reach that scale at a realistic demo-funnel
+capture rate, so this is low-urgency — but since `POST /api/leads` and
+`POST /api/demo-scan` are both public and unrate-limited by default
+(`LINCHPIN_RATE_LIMIT=0` ships off), a scripted flood of either endpoint
+could inflate `leads.jsonl` to that size in hours, not years, making every
+subsequent `/api/metrics` call slow (one thread-pool worker tied up per
+call, though it doesn't block the event loop directly since the handler
+is sync). Not fixed in this PR — a real fix (rotation, a cached/periodic
+aggregate instead of read-on-every-call, or enforcing
+`LINCHPIN_RATE_LIMIT` at the infra layer) is a reasonable follow-up if
+this endpoint ever sees real adversarial traffic, but is disproportionate
+scope for "internal tooling" nobody has abused yet. Setting
+`LINCHPIN_RATE_LIMIT` in production (already in the launch checklist for
+unrelated reasons) mitigates this the same way it mitigates the other
+public, unauthenticated endpoints.
 
 ## 2026-07-11 — E6 "modo partner / white-label" — MERGED as PR #136, deployed live, verified — this section is now historical
 

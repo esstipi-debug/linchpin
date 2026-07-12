@@ -54,13 +54,16 @@ The engine itself (`src/`) is pure computation over numpy/pandas — no shell, n
 | Clickjacking · MIME-sniffing · referrer leak | Always-on headers — `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `Permissions-Policy` — plus a **path-aware CSP** (strict on the dashboard; relaxed only for the `/console` React/Babel prototype) | [`security.py`](webapp/security.py) |
 | Brute force / abuse of `POST /api/jobs` | Opt-in sliding-window **rate limit** per client IP → `429` + `Retry-After` | [`security.py`](webapp/security.py) |
 | Unauthorized access | Opt-in **API-key gate** (constant-time compare) → `401` | [`security.py`](webapp/security.py) |
-| Lead PII (email) leaking via aggregate reporting | `GET /api/metrics` (E8, internal tooling) returns counts and small labeled buckets only — never a raw email — and is gated behind the same API-key control as `POST /api/jobs` | [`app.py`](webapp/app.py) (`api_metrics`) |
+| Lead PII (email) leaking via aggregate reporting | `GET /api/metrics` (E8, internal tooling) never returns a raw email; its "source"/"status"/"dataset" buckets (caller-controlled — a scripted `POST /api/leads`, or the filename a lead uploads on `/api/demo-scan`) are sanitized and length-capped before use as a bucket label (`app.py::_metrics_label`), and the number of distinct buckets is capped, with the overflow folded into `"other"` (`_metrics_bump`) — an attacker cannot inflate the response or smuggle PII-shaped text (e.g. an email-named upload) into it verbatim. Gated behind the same API-key control as `POST /api/jobs` | [`app.py`](webapp/app.py) (`api_metrics`, `_metrics_label`, `_metrics_bump`) |
 
 These paths are regression-tested in [`tests/test_webapp.py`](tests/test_webapp.py)
 (`test_input_validation`, `test_lead_overrides_rejects_nonfinite_and_out_of_range`,
-`test_jobs_upload_filename_traversal_is_contained`, `test_jobs_upload_too_large_rejected`)
-and [`tests/test_webapp_security.py`](tests/test_webapp_security.py) (headers, path-aware
-CSP, rate-limit and API-key behaviour).
+`test_jobs_upload_filename_traversal_is_contained`, `test_jobs_upload_too_large_rejected`),
+[`tests/test_webapp_security.py`](tests/test_webapp_security.py) (headers, path-aware
+CSP, rate-limit and API-key behaviour), and
+[`tests/test_webapp_metrics.py`](tests/test_webapp_metrics.py) (`GET /api/metrics`'s
+aggregation correctness, malformed-line tolerance, label sanitization/bucket cap,
+and its own API-key/rate-limit gating).
 
 ## Secret management
 
