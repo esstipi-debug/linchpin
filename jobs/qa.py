@@ -7,11 +7,20 @@ out-of-range allocation) so the human only reviews sound output.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from src.guided import GuidedOutcome, verify_guided
 
 from .inventory_optimization import JobReport
 from .leadership import DIMS, ChainProfile
 from .pricing import PricingReport
+
+if TYPE_CHECKING:  # avoid a real circular import: jobs.digest_job -> scm_agent.events
+    # -> scm_agent (package __init__) -> scm_agent.tools -> `from jobs import qa` -> here.
+    # `from __future__ import annotations` above already makes the verify_digest type
+    # hint a lazy string, so this import only ever runs for a type checker, never at
+    # module load time.
+    from .digest_job import DigestResult
 
 TOL = 1e-6
 
@@ -119,6 +128,37 @@ def verify_leadership(profile: ChainProfile) -> list[str]:
 
 def leadership_passed(profile: ChainProfile) -> bool:
     return not verify_leadership(profile)
+
+
+def verify_digest(result: DigestResult) -> list[str]:
+    """Return a list of QA issues for a daily digest (Linchpin 3.0 PR-3). Empty
+    list = passed. The invariant that matters here is "no fabricated data"
+    (plan rule 14): the per-type breakdown must actually sum to the reported
+    total, an empty ledger must not be reported as having events, and a
+    message that claims events happened must actually mention a count."""
+    issues: list[str] = []
+
+    if result.event_count < 0:
+        issues.append("digest: negative event_count")
+    if any(v < 0 for v in result.counts_by_type.values()):
+        issues.append("digest: negative count in counts_by_type")
+
+    counted = sum(result.counts_by_type.values())
+    if counted != result.event_count:
+        issues.append(f"digest: counts_by_type sums to {counted} but event_count is {result.event_count}")
+
+    if not result.message.strip():
+        issues.append("digest: empty message")
+    elif result.event_count == 0 and "no events" not in result.message:
+        issues.append("digest: zero events but message does not say so")
+    elif result.event_count > 0 and str(result.event_count) not in result.message:
+        issues.append("digest: message does not mention the actual event count")
+
+    return issues
+
+
+def digest_passed(result: DigestResult) -> bool:
+    return not verify_digest(result)
 
 
 def coverage_gate(outcome: GuidedOutcome) -> list[str]:

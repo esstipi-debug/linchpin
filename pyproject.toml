@@ -55,6 +55,15 @@ state = [
     "pandera>=0.32",
     "pyarrow>=15",
 ]
+# jobs/scheduler.py + jobs/notify.py -- in-process job scheduling (F0, PR-3).
+# APScheduler[sqlalchemy] brings the SQLite-backed SQLAlchemyJobStore the plan
+# calls for; httpx is notify()'s webhook client. Both degrade gracefully when
+# absent (see jobs/scheduler.py's SchedulerUnavailableError and
+# jobs/notify.py's no-op-without-httpx path) -- pin verified 2026-07.
+tower = [
+    "APScheduler[sqlalchemy]>=3.11.3,<4",
+    "httpx>=0.28",
+]
 
 [project.urls]
 Homepage = "https://github.com/esstipi-debug/linchpin"
