@@ -1,10 +1,125 @@
 # Linchpin — Session Handoff
 
-**Date:** 2026-07-11 · **Repo:** `esstipi-debug/linchpin` (private) · **Branch:** `feat/e6-partner-whitelabel`, **PR #136 open as draft** (adversarially reviewed and fixed — waiting on the operator's explicit go-ahead to merge). **PR #134 (E5) merged** since the last entry below — E1 **#125**, E2 **#128**, E3 **#129**, E4 **#131**, E5 **#134** all merged to `main` and deployed live on `https://linchpin.fly.dev`. **#122** audit-evidence, **#123** benchmarks, and a `docs/refresh-stale-counts`-style worktree still open concurrently. Note: PR numbering jumped from #134 to #136 — #135 belongs to a concurrent session on this repo (see `linchpin-concurrent-sessions` memory), not a mistake in this one.
+**Date:** 2026-07-11 · **Repo:** `esstipi-debug/linchpin` (private) · **Branch:** `feat/e8-internal-tooling`, **PR #138 open as draft**. E1 **#125**, E2 **#128**, E3 **#129**, E4 **#131**, E5 **#134**, E6 **#136** all merged to `main` and deployed live on `https://linchpin.fly.dev`. E7 **#137** open as a draft, reviewed, awaiting merge go-ahead (legal templates — see that branch/PR; this worktree branched from E6's merge commit and does not contain E7's files, which is expected — E7 and E8 don't touch any of the same files). **#122** audit-evidence, **#123** benchmarks, and a `docs/refresh-stale-counts`-style worktree still open concurrently. Note: PR numbering has jumped before (concurrent sessions on this repo also open PRs — see `linchpin-concurrent-sessions` memory) — a gap in the sequence is not a mistake in this session.
 
 **Purpose:** pick up Linchpin work in a fresh session without re-deriving context.
 
-## 2026-07-11 — E6 "modo partner / white-label" — reviewed, fixed, PR #136 open (draft) — needs merge go-ahead
+> **Permanent priority rule:** if a `PIPELINE.md` file exists at the repo
+> root describing an active deal, that work takes priority over **everything
+> else in this file** — any checklist item, any Linchpin 2.0 épica, any
+> "next step" noted below. Check for it before picking up anything else.
+> No `PIPELINE.md` exists as of this entry (no active deal) — don't create
+> one speculatively; it should only exist when there's a real deal to track.
+> Suggested format when one is actually needed (keep it this loose — this
+> is a scratch file for one person's own tracking, not a deliverable):
+> ```markdown
+> # Pipeline — <cliente>
+> **Estado:** <ej. "esperando datos de intake" | "propuesta enviada" | "negociando alcance">
+> **Paquete:** <ej. Diagnostico de Arranque>
+> **Próximo paso:** <la acción concreta siguiente, con fecha si la hay>
+> **Última actualización:** <fecha>
+> ```
+> `PIPELINE.md` is real per-deal working data (like `clients/`), not a
+> template or sample to commit — gitignore it if you create one.
+
+## 2026-07-11 — E8 "tooling interno" — reviewed, fixed, PR #138 open (draft) — needs merge go-ahead
+
+**Read this section first if you're picking up cold.** E8 is code-complete,
+adversarially reviewed, and **PR #138 is open as a draft** — the last
+épica in the Linchpin 2.0 build protocol. Nothing is blocking except the
+operator's explicit "mergea el PR #138" — do not merge it proactively. If
+the operator gives that instruction: merge, deploy to Fly (this DOES touch
+`webapp/app.py`, unlike E7), verify `GET /api/metrics` responds live, clean
+up this worktree/branch — and that's the end of the Linchpin 2.0 protocol
+as originally scoped (E1 through E8). What comes after is either a real
+deal working through `PIPELINE.md` (see the rule above) or a fresh
+protocol/priority the operator defines from here.
+
+### What E8 actually was — reconstructed from breadcrumbs, not the original spec
+
+The original Linchpin 2.0 protocol text (pasted directly into an early
+chat, never committed to the repo) was lost across a context-window
+compaction partway through this multi-session build. By the time this
+session reached E8, all that remained was three breadcrumbs, found by
+grepping this file and the checklist:
+`documentation/operator/09_checklist_lanzamiento.md`'s own placeholder
+line ("E8 — ninguna, es solo tooling interno" + the "Regla permanente ...
+cuando E8 aterrice" section describing the `PIPELINE.md` rule above), and
+an old E2-era note in this file's own history mentioning
+`leads.jsonl`'s `status` field exists "so E8's `/api/metrics` can count
+demos-run vs demos-converted later." From those three fragments, this
+session reconstructed E8 as: **(1)** a `GET /api/metrics` endpoint
+aggregating the demo/lead funnel telemetry, and **(2)** formally writing
+the `PIPELINE.md`-priority rule into this file (not just the checklist),
+since this file — not the checklist — is what a fresh session actually
+reads first. If the original protocol specified something more/different
+for E8, it's lost; this is a defensible reconstruction, not a rediscovery
+of the real thing. Flagging this loudly in case a future session finds
+the original notes somewhere and E8 needs revisiting.
+
+### What was built
+
+- **`GET /api/metrics`** (`webapp/app.py`): reads `leads.jsonl` (the only
+  operational telemetry stream in the codebase — confirmed nothing else
+  logs `run_package`/commercial-package activity anywhere) and returns
+  aggregate counts only — total captures, unique emails (never the emails
+  themselves), a by-source breakdown, and for `demo-scan` specifically,
+  counts by status and by dataset. `source`/`status`/`dataset` are all
+  **caller-controlled** (a scripted `POST /api/leads`, or the filename a
+  lead's own upload happens to be named on `/api/demo-scan`) — an early
+  version of this endpoint echoed them as response keys unsanitized and
+  uncapped, which the adversarial review below caught as both a real PII
+  leak (an email-named upload landed verbatim in the response) and an
+  unbounded-growth vector. Fixed via `_metrics_label` (strips to a safe
+  character set, caps length) and `_metrics_bump` (caps distinct buckets,
+  folds overflow into `"other"`) — every bucket key in the response is now
+  provably sanitized and bounded, not just assumed safe because the two
+  current writers happen to behave. Gated behind
+  `Depends(security.require_api_key)` + `Depends(security.rate_limit)`,
+  the same pattern as `POST /api/jobs` — a no-op when `LINCHPIN_API_KEY`
+  is unset (the shipped default), so this doesn't force auth in local/dev
+  use, only once an operator deploying publicly opts in. A malformed
+  line, or a syntactically-valid-JSON line that isn't an object (e.g. a
+  hand-edited `leads.jsonl` with a bare string/number/list on one line),
+  is skipped, not a crash — an earlier version only guarded
+  `json.JSONDecodeError` and crashed (permanently, since `leads.jsonl` is
+  append-only with no rotation) on the second case. `SECURITY.md` updated
+  (the `LINCHPIN_API_KEY` table row, the "Controls enforced in code" row,
+  and the regression-tested-in paragraph) to match.
+- **The `PIPELINE.md` priority rule**, moved into this file's own
+  standing header (see above) rather than living only in the checklist,
+  which a fresh session might not read at all. The checklist's own
+  section was shortened to point back here as the source of truth, so the
+  rule text doesn't drift out of sync between two copies.
+- Test suite for `tests/test_webapp_metrics.py`, matching the house style
+  from `tests/test_webapp_security.py`/`tests/test_webapp_demo_scan.py`
+  (isolated `LEADS_FILE` fixture, API-key/rate-limit dependency tests, an
+  explicit "never a raw email in the response body" assertion, malformed-
+  AND wrong-shaped-JSON-line tolerance, label-sanitization/bucket-cap
+  coverage, and the `"unknown"` fallback branches).
+
+### Known limitation, deferred rather than fixed
+
+`GET /api/metrics` reads and parses the ENTIRE `leads.jsonl` file on every
+single call (`LEADS_FILE.read_text().splitlines()`, no caching, no
+pagination) — benchmarked at ~0.9s for 500K lines (~60 MB). Organic growth
+alone would take decades to reach that scale at a realistic demo-funnel
+capture rate, so this is low-urgency — but since `POST /api/leads` and
+`POST /api/demo-scan` are both public and unrate-limited by default
+(`LINCHPIN_RATE_LIMIT=0` ships off), a scripted flood of either endpoint
+could inflate `leads.jsonl` to that size in hours, not years, making every
+subsequent `/api/metrics` call slow (one thread-pool worker tied up per
+call, though it doesn't block the event loop directly since the handler
+is sync). Not fixed in this PR — a real fix (rotation, a cached/periodic
+aggregate instead of read-on-every-call, or enforcing
+`LINCHPIN_RATE_LIMIT` at the infra layer) is a reasonable follow-up if
+this endpoint ever sees real adversarial traffic, but is disproportionate
+scope for "internal tooling" nobody has abused yet. Setting
+`LINCHPIN_RATE_LIMIT` in production (already in the launch checklist for
+unrelated reasons) mitigates this the same way it mitigates the other
+public, unauthenticated endpoints.
+
+## 2026-07-11 — E6 "modo partner / white-label" — MERGED as PR #136, deployed live, verified — this section is now historical
 
 **Read this section first if you're picking up cold.** E6 is code-complete,
 adversarially reviewed, all 9 confirmed findings fixed or consciously

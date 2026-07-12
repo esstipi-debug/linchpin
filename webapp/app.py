@@ -642,7 +642,13 @@ async def api_demo_scan(
         data = await file.read(MAX_UPLOAD_BYTES + 1)
         if len(data) > MAX_UPLOAD_BYTES:
             raise HTTPException(status_code=413, detail=f"upload exceeds {MAX_UPLOAD_BYTES} bytes")
-        upload.write_bytes(data)
+        try:
+            upload.write_bytes(data)
+        except OSError as exc:
+            # A filename that's syntactically fine for os.path.basename() can
+            # still be rejected by the underlying filesystem (Windows: <>:"|?*,
+            # reserved names; any OS: an overlong path) - a 400, not a crash.
+            raise HTTPException(status_code=400, detail="invalid upload filename") from exc
         data_path, dataset_label = upload, safe_name
     elif use_sample:
         data_path, dataset_label = SAMPLE_STOCK_FILE, "sample_stock_snapshot.csv"
@@ -698,6 +704,88 @@ async def api_demo_scan(
         "findings": list(result.findings),
         "cta_url": demo_scan.CTA_PATH,
         "dataset": dataset_label,
+    }
+
+
+_METRICS_LABEL_RE = re.compile(r"[^\w.\- ]")
+_METRICS_LABEL_MAX_LEN = 60
+_METRICS_MAX_BUCKETS = 25  # beyond this many distinct labels, fold the rest into "other"
+
+
+def _metrics_label(value: object) -> str:
+    """A caller-controlled field (source/status/dataset) reduced to a safe,
+    length-capped bucket label - never a non-string/unhashable value (which
+    would crash a dict-keying aggregation), and never PII-shaped text
+    surviving verbatim (an uploaded filename that happens to be an email
+    address, e.g., loses its '@' and most punctuation here), unlike a plain
+    `.get(...) or "unknown"` on unvalidated JSONL content."""
+    if not isinstance(value, str) or not value.strip():
+        return "unknown"
+    cleaned = _METRICS_LABEL_RE.sub("", value).strip()
+    return (cleaned or "unknown")[:_METRICS_LABEL_MAX_LEN]
+
+
+def _metrics_bump(bucket: dict[str, int], label: str) -> None:
+    """Increment ``bucket[label]``, folding a label beyond ``_METRICS_MAX_BUCKETS``
+    distinct keys into "other" - caller-controlled labels (an arbitrary
+    upload filename or a scripted /api/leads "source" value) must not let an
+    attacker inflate the response with unbounded, ever-growing keys."""
+    if label not in bucket and len(bucket) >= _METRICS_MAX_BUCKETS:
+        label = "other"
+    bucket[label] = bucket.get(label, 0) + 1
+
+
+@app.get("/api/metrics", dependencies=[Depends(security.rate_limit), Depends(security.require_api_key)])
+def api_metrics() -> dict:
+    """Aggregate, PII-free counts from the lead-capture telemetry (leads.jsonl) -
+    internal tooling for the operator (E8), not for public consumption: gated
+    behind LINCHPIN_API_KEY, same as POST /api/jobs (a no-op when unset, so this
+    doesn't force auth in local/dev use). Never returns a raw email or any other
+    per-lead identifying value - only counts and small, sanitized, count-capped
+    labeled buckets (see _metrics_label/_metrics_bump) - leads.jsonl's "source"
+    and "dataset" fields are caller-controlled (a scripted /api/leads POST, or
+    an uploaded file's own name on /api/demo-scan) and must never be trusted to
+    already be safe, short, or non-PII-shaped by the time they reach this
+    endpoint. leads.jsonl is the only operational telemetry stream in the
+    codebase; there is nothing (yet) to report about commercial-package runs,
+    which aren't logged anywhere. A line that is malformed JSON, or valid JSON
+    that isn't an object, is skipped rather than crashing the request."""
+    total = 0
+    emails: set[str] = set()
+    by_source: dict[str, int] = {}
+    demo_scan_status: dict[str, int] = {}
+    demo_scan_dataset: dict[str, int] = {}
+    if LEADS_FILE.exists():
+        for line in LEADS_FILE.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(rec, dict):
+                continue
+            total += 1
+            email = rec.get("email")
+            if isinstance(email, str) and email.strip():
+                emails.add(email.strip().lower())
+            source = _metrics_label(rec.get("source"))
+            _metrics_bump(by_source, source)
+            if source == "demo-scan":
+                _metrics_bump(demo_scan_status, _metrics_label(rec.get("status")))
+                _metrics_bump(demo_scan_dataset, _metrics_label(rec.get("dataset")))
+    return {
+        "leads": {
+            "total_captures": total,
+            "unique_emails": len(emails),
+            "by_source": by_source,
+        },
+        "demo_scan": {
+            "total_runs": by_source.get("demo-scan", 0),
+            "by_status": demo_scan_status,
+            "by_dataset": demo_scan_dataset,
+        },
     }
 
 

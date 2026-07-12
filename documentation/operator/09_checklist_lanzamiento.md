@@ -87,6 +87,18 @@
       qué hacer con los reportes individuales que todavía dicen "Linchpin"
       (ver el punto de arriba).
 
+## Modo Interno / Métricas (E8, ya en código)
+
+- [ ] Nada obligatorio — `GET /api/metrics` funciona sin configuración
+      (cuenta capturas desde `webapp/_leads/leads.jsonl`). Si el despliegue
+      ya tiene `LINCHPIN_API_KEY` configurado (recomendado, ver
+      [07 · Setup de Venta](07_setup_venta.md)), esa misma clave ya protege
+      este endpoint — no hace falta nada nuevo.
+- [ ] Rutina operativa opcional: `curl -H "X-API-Key: <tu clave>"
+      https://linchpin.fly.dev/api/metrics` para ver capturas totales,
+      emails únicos, y desglose del funnel de demo (ok vs qa_failed) sin
+      tener que descargar `leads.jsonl` a mano.
+
 ## Pendiente segun épicas futuras (se completa cuando esa épica aterrice)
 
 - [ ] E4/E5 — sin acciones humanas esperadas (i18n y citation-gate son
@@ -94,10 +106,12 @@
 - [ ] E7 — hacer revisar el `service-agreement-template.md` y `dpa-lite.md`
       por un abogado real antes de usarlos con un cliente pagando (marcados
       `[REVISAR CON ABOGADO]` en el propio documento)
-- [ ] E8 — ninguna, es solo tooling interno
 
-## Regla permanente (se codifica formalmente en HANDOFF.md cuando E8 aterrice)
+## Regla permanente
 
-Cuando exista `PIPELINE.md` en la raíz del repo con un deal activo, ese trabajo
+Ver la nota "Permanent priority rule" al principio de
+[HANDOFF.md](../../HANDOFF.md) (esa es la copia canónica — no la dupliques
+acá, editala ahí para que no queden dos versiones desincronizadas): cuando
+exista `PIPELINE.md` en la raíz del repo con un deal activo, ese trabajo
 tiene prioridad sobre cualquier ítem de este checklist o cualquier épica de
 Linchpin 2.0.
