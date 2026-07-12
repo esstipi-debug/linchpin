@@ -54,6 +54,7 @@ The engine itself (`src/`) is pure computation over numpy/pandas — no shell, n
 | Clickjacking · MIME-sniffing · referrer leak | Always-on headers — `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `Permissions-Policy` — plus a **path-aware CSP** (strict on the dashboard; relaxed only for the `/console` React/Babel prototype) | [`security.py`](webapp/security.py) |
 | Brute force / abuse of `POST /api/jobs` | Opt-in sliding-window **rate limit** per client IP → `429` + `Retry-After` | [`security.py`](webapp/security.py) |
 | Unauthorized access | Opt-in **API-key gate** (constant-time compare) → `401` | [`security.py`](webapp/security.py) |
+| Lead PII (email) leaking via aggregate reporting | `GET /api/metrics` (E8, internal tooling) returns counts and small labeled buckets only — never a raw email — and is gated behind the same API-key control as `POST /api/jobs` | [`app.py`](webapp/app.py) (`api_metrics`) |
 
 These paths are regression-tested in [`tests/test_webapp.py`](tests/test_webapp.py)
 (`test_input_validation`, `test_lead_overrides_rejects_nonfinite_and_out_of_range`,
@@ -82,7 +83,7 @@ environment variables before exposing the app publicly:
 
 | Variable | Effect | Default |
 |----------|--------|---------|
-| `LINCHPIN_API_KEY` | Require a matching `X-API-Key` header on `POST /api/jobs` | unset → open |
+| `LINCHPIN_API_KEY` | Require a matching `X-API-Key` header on `POST /api/jobs` and `GET /api/metrics` | unset → open |
 | `LINCHPIN_RATE_LIMIT` | Max requests per window per client IP (`0` disables) | `0` → off |
 | `LINCHPIN_RATE_WINDOW` | Rate-limit window, seconds | `60` |
 | `LINCHPIN_CORS_ORIGINS` | Comma-separated CORS allowlist | unset → same-origin only |

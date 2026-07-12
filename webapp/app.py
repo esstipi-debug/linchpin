@@ -701,6 +701,55 @@ async def api_demo_scan(
     }
 
 
+@app.get("/api/metrics", dependencies=[Depends(security.rate_limit), Depends(security.require_api_key)])
+def api_metrics() -> dict:
+    """Aggregate, PII-free counts from the lead-capture telemetry (leads.jsonl) -
+    internal tooling for the operator (E8), not for public consumption: gated
+    behind LINCHPIN_API_KEY, same as POST /api/jobs (a no-op when unset, so this
+    doesn't force auth in local/dev use). Never returns a raw email or any other
+    per-lead identifying value - only counts and small labeled buckets. leads.jsonl
+    is the only operational telemetry stream in the codebase; there is nothing
+    (yet) to report about commercial-package runs, which aren't logged anywhere."""
+    total = 0
+    emails: set[str] = set()
+    by_source: dict[str, int] = {}
+    demo_scan_status: dict[str, int] = {}
+    demo_scan_dataset: dict[str, int] = {}
+    if LEADS_FILE.exists():
+        for line in LEADS_FILE.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            total += 1
+            email = rec.get("email")
+            if isinstance(email, str) and email:
+                emails.add(email.lower())
+            source = rec.get("source") or "unknown"
+            by_source[source] = by_source.get(source, 0) + 1
+            if source == "demo-scan":
+                status = rec.get("status") or "unknown"
+                demo_scan_status[status] = demo_scan_status.get(status, 0) + 1
+                dataset = rec.get("dataset")
+                if isinstance(dataset, str) and dataset:
+                    demo_scan_dataset[dataset] = demo_scan_dataset.get(dataset, 0) + 1
+    return {
+        "leads": {
+            "total_captures": total,
+            "unique_emails": len(emails),
+            "by_source": by_source,
+        },
+        "demo_scan": {
+            "total_runs": by_source.get("demo-scan", 0),
+            "by_status": demo_scan_status,
+            "by_dataset": demo_scan_dataset,
+        },
+    }
+
+
 def _warehouse_params(
     building_w: float, building_d: float, height: float, levels: int,
     modules: int, aisle_width: float, docks: int, gates: int, yard_depth: float,
