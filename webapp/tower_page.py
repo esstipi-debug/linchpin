@@ -37,6 +37,7 @@ from __future__ import annotations
 from html import escape
 
 from scm_agent.autonomy import AutonomyRecord
+from scm_agent.autonomy_promotion import PromotionRecord
 
 # How many T1 audit rows the page shows -- audit history keeps growing
 # forever (scm_agent.autonomy.AutonomyLedger.list_all() is unbounded, same
@@ -191,11 +192,60 @@ def _t2_rows(records: list[AutonomyRecord]) -> str:
     )
 
 
-def render_tower_html(*, t1_records: list[AutonomyRecord], t2_records: list[AutonomyRecord]) -> str:
+def _promotion_rows(records: list[PromotionRecord]) -> str:
+    """Pending T2->T1 autonomy PROMOTIONS (Linchpin 3.0 PR-9, Golden Rule
+    11) -- evidence-gated proposals from ``scm_agent.autonomy_promotion``
+    awaiting a human's one-click approve/reject. T1->T2 DEGRADATIONS never
+    appear here: they are applied immediately (no pending state) and show
+    up in the T1 audit trail instead."""
+    if not records:
+        return '<p class="empty">No hay promociones de autonomia pendientes en este momento.</p>'
+    rows = []
+    for r in records:
+        headlines = [
+            f"{e.get('headline_precision'):.0%}" for e in r.evidence if e.get("headline_precision") is not None
+        ]
+        evidence_text = ", ".join(headlines) or "(ver rationale)"
+        rows.append(
+            "<tr>"
+            f"<td>{escape(r.event_type)}</td>"
+            f"<td>{escape(r.tool)}</td>"
+            f"<td>{_tier_chip(r.from_tier)} &rarr; {_tier_chip(r.to_tier)}</td>"
+            f"<td>{escape(evidence_text)}</td>"
+            f'<td>{escape(r.rationale)}</td>'
+            f"<td>{escape(r.created_at.isoformat())}</td>"
+            "<td>"
+            f'<button class="btn btn-primary promotion-approve-btn" data-promotion-id="{escape(r.id)}" '
+            'onclick="towerApprovePromotion(this)">Aprobar</button> '
+            f'<button class="btn promotion-reject-btn" data-promotion-id="{escape(r.id)}" '
+            'onclick="towerRejectPromotion(this)">Rechazar</button>'
+            f'<div class="approve-result" data-promotion-id="{escape(r.id)}"></div>'
+            "</td>"
+            "</tr>"
+        )
+    return (
+        '<table><thead><tr><th>Evento</th><th>Tool</th><th>Tier</th><th>Evidencia (precision)</th>'
+        "<th>Rationale</th><th>Propuesta desde</th><th>Accion</th></tr></thead><tbody>"
+        + "".join(rows)
+        + "</tbody></table>"
+    )
+
+
+def render_tower_html(
+    *,
+    t1_records: list[AutonomyRecord],
+    t2_records: list[AutonomyRecord],
+    promotion_records: list[PromotionRecord] | None = None,
+) -> str:
     """Render the full ``/tower`` page. ``t1_records``/``t2_records`` are
     real ``scm_agent.autonomy.AutonomyRecord`` rows the caller already
     queried from ``AutonomyLedger`` (see module docstring for why this stays
-    a plain-argument function rather than fetching them itself)."""
+    a plain-argument function rather than fetching them itself).
+    ``promotion_records`` (PR-9, defaults to none pending) are real
+    ``scm_agent.autonomy_promotion.PromotionRecord`` rows already queried
+    from ``PromotionLedger.list_pending()`` -- same plain-argument
+    convention."""
+    promotion_records = promotion_records or []
     body = (
         _HEAD
         + '<section style="padding-bottom:6px">'
@@ -215,6 +265,15 @@ def render_tower_html(*, t1_records: list[AutonomyRecord], t2_records: list[Auto
         + 'placeholder="solo si este deploy la requiere" oninput="towerSaveApiKey(this.value)"></div>'
         + "</div>"
         + f'<div style="margin-top:14px">{_t2_rows(t2_records)}</div>'
+        + "</section>"
+        + '<section class="panel">'
+        + "<h2>Promociones de autonomia pendientes (T2&rarr;T1, A4)</h2>"
+        + '<p class="muted" style="margin:2px 0 14px;font-size:13px">Propuestas por '
+        + "<code>scm_agent.autonomy_promotion.evaluate_promotion</code> con evidencia de "
+        + "<code>src/verify/reliability.py</code> adjunta (Regla de Oro 11: la autonomia se gana con "
+        + "evidencia, nunca por edicion manual de config) -- aprobar aplica el cambio real a "
+        + "<code>config/event_routing.yaml</code>.</p>"
+        + _promotion_rows(promotion_records)
         + "</section>"
         + '<section class="panel">'
         + "<h2>Ejecutado automaticamente (T1)</h2>"
@@ -307,6 +366,37 @@ async function towerApprove(button) {
     button.disabled = false;
   }
 }
+
+async function towerResolvePromotion(button, action) {
+  var id = button.getAttribute("data-promotion-id");
+  var resultEl = document.querySelector('.approve-result[data-promotion-id="' + id + '"]');
+  var row = button.closest("tr");
+  if (row) { row.querySelectorAll("button").forEach(function (b) { b.disabled = true; }); }
+  if (resultEl) resultEl.innerHTML = "";
+  var headers = {};
+  var key = towerApiKey();
+  if (key) headers["X-API-Key"] = key;
+  try {
+    var r = await fetch("/api/promotions/" + encodeURIComponent(id) + "/" + action, { method: "POST", headers: headers });
+    var data = await r.json().catch(function () { return {}; });
+    if (!r.ok) {
+      var msg = r.status === 401
+        ? "API key invalida o faltante."
+        : (data && data.detail) || ("Error " + r.status + " del servidor.");
+      if (resultEl) resultEl.innerHTML = '<div class="err-msg">' + towerEscape(msg) + "</div>";
+      if (row) { row.querySelectorAll("button").forEach(function (b) { b.disabled = false; }); }
+      return;
+    }
+    if (resultEl) resultEl.innerHTML = '<div class="ok-msg">' + towerEscape(data.summary || "listo") + "</div>";
+    button.textContent = action === "approve" ? "Aprobado" : "Rechazado";
+  } catch (err) {
+    if (resultEl) resultEl.innerHTML = '<div class="err-msg">Fallo de red: ' + towerEscape((err && err.message) || err) + "</div>";
+    if (row) { row.querySelectorAll("button").forEach(function (b) { b.disabled = false; }); }
+  }
+}
+
+function towerApprovePromotion(button) { towerResolvePromotion(button, "approve"); }
+function towerRejectPromotion(button) { towerResolvePromotion(button, "reject"); }
 
 async function towerLoadEvents() {
   var listEl = document.getElementById("tower-events");

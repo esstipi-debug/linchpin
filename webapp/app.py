@@ -44,6 +44,13 @@ from scm_agent.autonomy import (  # noqa: E402
     AutonomyRecord,
     acknowledge_pending,
 )
+from scm_agent.autonomy_promotion import (  # noqa: E402
+    PromotionLedger,
+    PromotionRecord,
+    approve_promotion,
+    reject_promotion,
+)
+from scm_agent.event_intent import DEFAULT_ROUTING_PATH as EVENT_ROUTING_DEFAULT_PATH  # noqa: E402
 from scm_agent.events import DEFAULT_PATH as EVENTS_DEFAULT_PATH  # noqa: E402
 from scm_agent.events import Event, EventLedger  # noqa: E402
 from src.constraints import InventoryItem, allocate_under_budget  # noqa: E402
@@ -99,6 +106,9 @@ MCP_KEYS_PATH = os.environ.get("LINCHPIN_MCP_KEYS_PATH", "").strip() or MCP_KEYS
 # AFTER that import can never retroactively change.
 EVENTS_LEDGER_PATH = EVENTS_DEFAULT_PATH
 AUTONOMY_LEDGER_PATH = AUTONOMY_DEFAULT_PATH
+# Same monkeypatch-friendly convention, for the one real file
+# api_approve_promotion() mutates (Linchpin 3.0 PR-9) -- config/event_routing.yaml.
+EVENT_ROUTING_PATH = EVENT_ROUTING_DEFAULT_PATH
 
 
 def _get_orchestrator() -> Orchestrator:
@@ -141,6 +151,15 @@ def _get_autonomy_ledger() -> AutonomyLedger:
     """See _get_event_ledger()'s docstring -- same fresh-connection-per-call
     reasoning applies here."""
     return AutonomyLedger(AUTONOMY_LEDGER_PATH)
+
+
+def _get_promotion_ledger() -> PromotionLedger:
+    """See _get_event_ledger()'s docstring -- same fresh-connection-per-call
+    reasoning applies here. Shares AUTONOMY_LEDGER_PATH with
+    _get_autonomy_ledger() -- scm_agent.autonomy_promotion.PromotionLedger's
+    own default path is the SAME scm_agent.autonomy.DEFAULT_PATH (see that
+    module's docstring: one autonomy.sqlite3, two tables)."""
+    return PromotionLedger(AUTONOMY_LEDGER_PATH)
 
 
 class SafeJSONResponse(JSONResponse):
@@ -851,6 +870,13 @@ def _autonomy_record_to_dict(record: AutonomyRecord) -> dict:
     return d
 
 
+def _promotion_record_to_dict(record: PromotionRecord) -> dict:
+    d = asdict(record)
+    d["created_at"] = record.created_at.isoformat()
+    d["resolved_at"] = record.resolved_at.isoformat() if record.resolved_at else None
+    return d
+
+
 @app.get("/api/events", dependencies=[Depends(security.rate_limit)])
 def api_events(
     limit: int = Query(_EVENTS_DEFAULT_LIMIT, ge=1, le=_EVENTS_MAX_LIMIT),
@@ -920,22 +946,99 @@ def api_approve_pending(
     }
 
 
+@app.post(
+    "/api/promotions/{promotion_id}/approve",
+    dependencies=[Depends(security.rate_limit), Depends(security.require_api_key)],
+)
+def api_approve_promotion(
+    promotion_id: str,
+    approved_by: str = Query("operator", description="Who is approving this promotion (audit trail)"),
+) -> dict:
+    """The human sign-off Golden Rule 11 requires for a T2->T1 autonomy
+    promotion (Linchpin 3.0 PR-9): complete a PENDING
+    scm_agent.autonomy_promotion.PromotionRecord via approve_promotion() --
+    the SAME function PR-9 built specifically for this endpoint, not a
+    second, parallel approval mechanism. This is what actually mutates
+    config/event_routing.yaml's autonomy_tier for subsequent events of that
+    type.
+
+    Gated the same as POST /api/approvals/{id} (require_api_key + rate_limit
+    -- this mutates a config file on disk, not just an in-memory ledger row).
+    An unknown id is a 404; an id that is not currently pending, OR whose
+    proposal's expected from_tier no longer matches the file's current tier
+    (config moved since the proposal was created), is a 409 -- all loud,
+    actionable failures, never a silent no-op.
+    """
+    clean_by = _APPROVED_BY_RE.sub("", approved_by)[:_APPROVED_BY_MAX_LEN].strip() or "operator"
+    ledger = _get_promotion_ledger()
+    try:
+        try:
+            outcome = approve_promotion(ledger, promotion_id, clean_by, routing_path=EVENT_ROUTING_PATH)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=f"unknown promotion id: {promotion_id}") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        record = ledger.get(promotion_id)
+    finally:
+        ledger.close()
+    return {
+        "status": outcome.status,
+        "summary": outcome.summary,
+        "record": _promotion_record_to_dict(record) if record is not None else None,
+    }
+
+
+@app.post(
+    "/api/promotions/{promotion_id}/reject",
+    dependencies=[Depends(security.rate_limit), Depends(security.require_api_key)],
+)
+def api_reject_promotion(
+    promotion_id: str,
+    rejected_by: str = Query("operator", description="Who is rejecting this promotion (audit trail)"),
+) -> dict:
+    """Reject a PENDING T2->T1 autonomy promotion (Linchpin 3.0 PR-9) --
+    config/event_routing.yaml is never touched. Same auth level and 404/409
+    error-code conventions as the approve endpoint above."""
+    clean_by = _APPROVED_BY_RE.sub("", rejected_by)[:_APPROVED_BY_MAX_LEN].strip() or "operator"
+    ledger = _get_promotion_ledger()
+    try:
+        try:
+            record = reject_promotion(ledger, promotion_id, clean_by)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=f"unknown promotion id: {promotion_id}") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    finally:
+        ledger.close()
+    return {"status": "rejected", "record": _promotion_record_to_dict(record)}
+
+
 @app.get("/tower")
 def tower_page() -> HTMLResponse:
     """The Control Tower dashboard tab (Linchpin 3.0 PR-7, plan S5): T1
     auto-executed actions and T2 pending approvals are rendered server-side
     from the real AutonomyLedger at request time; "eventos de hoy" is
-    populated client-side via GET /api/events; the A4 per-tool reliability
-    section is a clearly-labeled placeholder until PR-8 lands
-    (src/verify/backtest.py + src/verify/reliability.py)."""
-    ledger = _get_autonomy_ledger()
+    populated client-side via GET /api/events; pending T2->T1 autonomy
+    promotions (Linchpin 3.0 PR-9) are rendered server-side from the real
+    PromotionLedger; the A4 per-tool reliability section is a clearly-labeled
+    placeholder until a future PR wires it into this page
+    (src/verify/backtest.py + src/verify/reliability.py already exist as of
+    PR-8, but nothing here reads them yet)."""
+    autonomy_ledger = _get_autonomy_ledger()
     try:
-        records = ledger.list_all()
+        records = autonomy_ledger.list_all()
     finally:
-        ledger.close()
+        autonomy_ledger.close()
     t1 = [r for r in records if r.status == STATUS_AUTO_EXECUTED][-T1_DISPLAY_LIMIT:]
     t2 = [r for r in records if r.status == STATUS_PENDING]
-    return HTMLResponse(render_tower_html(t1_records=t1, t2_records=t2))
+
+    promotion_ledger = _get_promotion_ledger()
+    try:
+        promotions = promotion_ledger.list_pending()
+    finally:
+        promotion_ledger.close()
+
+    return HTMLResponse(render_tower_html(t1_records=t1, t2_records=t2, promotion_records=promotions))
 
 
 def _warehouse_params(
