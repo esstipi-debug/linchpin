@@ -89,6 +89,21 @@ pricing-intel = [
     # run the CLI against a live URL without also pulling in APScheduler.
     "httpx>=0.28",
 ]
+# src/pricing_intel/match/probabilistic.py's documented future upgrade path
+# (PR-14 spike, plan section 14 risk #4): splink>=4 installs cleanly and its
+# DuckDB backend runs real linking predictions on this Windows py3.11 venv
+# (splink==4.0.16 + duckdb==1.5.4, verified 2026-07) -- the wheel risk the
+# plan flagged did NOT materialize. It is NOT imported by probabilistic.py
+# yet: a naive comparison over raw title text mis-ranks a wrong-model
+# variant above a correctly-reworded title (Jaro-Winkler is prefix/order
+# sensitive; RapidFuzz's token_sort_ratio, this PR's shipped scorer, is
+# not) -- see probabilistic.py's module docstring for the full writeup and
+# the calibrated, hand-verified fallback that ships instead. rapidfuzz and
+# python-stdnum (gtin.py/fuzzy.py, already used) live in the dataquality
+# extra -- not duplicated here.
+matching = [
+    "splink>=4",
+]
 
 [project.urls]
 Homepage = "https://github.com/esstipi-debug/linchpin"
