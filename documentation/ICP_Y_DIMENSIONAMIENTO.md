@@ -107,18 +107,40 @@ VERIFICADO por conteo directo (`scm_agent/tools.py`, `webapp/mcp_tool_specs.py`)
 **Corrección importante — conectores reales (VERIFICADO por grep en
 `src/connectors/`, `scm_agent/`, `jobs/`, `webapp/`, case-insensitive):**
 
-- Conectores REALES con implementación funcional: **solo Odoo**
-  (`src/connectors/odoo.py`) y **Excel/xlsx** (`src/connectors/excel.py`).
-- **Mercado Libre / MELI: cero menciones en todo el código.** No existe ese
-  conector, ni en forma de emulador. El brief original de esta tarea asumía
-  "connectors Mercado Libre + Odoo" — ese supuesto es **falso** y no debe
-  repetirse en material de venta.
-- Shopify y Amazon aparecen **solo como comentarios de diseño futuro**:
-  `src/connectors/__init__.py` documenta el patrón para que "una adaptador
+- Al momento de escribir esta sección (rama basada en `origin/main` previo
+  a la PR #143), los conectores REALES con implementación funcional eran
+  **solo Odoo** (`src/connectors/odoo.py`) y **Excel/xlsx**
+  (`src/connectors/excel.py`). Mercado Libre no existía en ningún lado del
+  código, y el brief original de esta tarea asumía "connectors Mercado
+  Libre + Odoo" — ese supuesto era **falso** en ese momento.
+- **Actualización 2026-07-13: PR #143 ("Linchpin 3.0", 25 PRs) se mergeó a
+  `main` el mismo día, y agrega un conector de Mercado Libre real —
+  cambia lo de arriba.** Son dos módulos distintos, no uno solo, y la
+  distinción importa para no sobre-vender:
+  - `src/pricing_intel/acquire/meli_api.py` (PR-15): **lectura** de
+    listados públicos de un COMPETIDOR en Mercado Libre (inteligencia de
+    precios/monitoreo), gateada por `require_approved_site` — no es un
+    conector del cliente, es un fetcher de datos de mercado.
+  - `src/connectors/meli_prices.py` (PR-18): conector de **escritura de
+    precio, `[CRED]`-gated**, para que un cliente autentique con SU PROPIA
+    cuenta de vendedor de Mercado Libre (OAuth del Developers Program
+    oficial) y actualice el precio de SUS PROPIOS listados — mismo patrón
+    de dos capas que `odoo.py` (staged, reversible, con `MeliPriceStore`
+    testeado offline contra un `InMemoryMeli`).
+  - **Lo que esto significa para pauta, a partir de ahora:** Mercado Libre
+    SÍ es un conector real y auditable — pero acotado a **repricing**
+    (parte del track "Kern Revenue" de precios), no un reemplazo del
+    conector de inventario/reposición que sí tiene Odoo. No vender
+    "integramos tu inventario de Mercado Libre" (falso) — sí se puede
+    vender "actualizamos tus precios en Mercado Libre de forma segura y
+    reversible" (verificado, requiere que el cliente aporte sus propias
+    credenciales OAuth).
+- Shopify y Amazon **siguen siendo solo comentarios de diseño futuro** —
+  `src/connectors/__init__.py` documenta el patrón para que "un adaptador
   real de Shopify/Amazon después" sea fácil de sumar, y `emulator.py`/
-  `simulator.py` son *stand-ins* sintéticos para testear ese patrón — no hay
-  ningún adaptador real de marketplace hoy. **No vender "integramos con
-  Shopify/Amazon/Mercado Libre" — es falso.**
+  `simulator.py` son *stand-ins* sintéticos — a diferencia de Mercado
+  Libre, todavía no hay ningún adaptador real de Shopify/Amazon. **No
+  vender "integramos con Shopify/Amazon" — sigue siendo falso.**
 
 ### 1.5 Autonomía end-to-end (%) — STALE, no re-verificable esta sesión
 

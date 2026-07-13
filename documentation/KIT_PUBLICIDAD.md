@@ -108,9 +108,14 @@ Cada ángulo está atado a un trigger event (ver `ICP_Y_DIMENSIONAMIENTO.md`
 
 ## 5. Claims PROHIBIDOS (no auditables — nunca afirmar)
 
-- **"Integramos con Mercado Libre"** — no existe ese conector en el código
-  (verificado por grep en todo el repo). Solo Odoo y Excel son conectores
-  reales; Shopify/Amazon son placeholders de diseño futuro, no productos.
+- **"Integramos tu inventario/reposición de Mercado Libre"** — falso: el
+  conector real de Mercado Libre que existe (`src/connectors/meli_prices.py`,
+  sumado por PR #143, 2026-07-13) es de **repricing** (actualizar precios
+  de tus propios listados, `[CRED]`-gated con tu propia cuenta OAuth), no
+  de inventario/reposición — eso sigue siendo solo Odoo y Excel. Sí se
+  puede afirmar "actualizamos tus precios en Mercado Libre de forma segura
+  y reversible" (verificado). Shopify/Amazon siguen siendo placeholders de
+  diseño futuro, no productos — no vender integración con ellos.
 - **"Kern ahorra X horas de trabajo"** como cifra dura — no está instrumentado
   (§3.4 de `ICP_Y_DIMENSIONAMIENTO.md`). Puede mencionarse como estimación
   ("hasta ~40 h de análisis en 2 semanas"), nunca como medición real.
