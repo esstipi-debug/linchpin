@@ -8,8 +8,9 @@ batch"):
 - registering a duplicate job id is rejected (unless replace=True), matching
   ToolRegistry.register's "already registered" guard;
 - build_scheduler() raises SchedulerUnavailableError when APScheduler (the
-  'tower' extra) is not installed -- exercised for real here, since this
-  repo's test environment does not install it;
+  'tower' extra) is not installed -- the 'tower' extra IS installed in this
+  test environment (requirements-dev.txt), so absence is simulated via
+  monkeypatching _HAS_APSCHEDULER rather than relying on ambient state;
 - build_scheduler() wires every registered job onto the underlying
   BackgroundScheduler with the right trigger/trigger_args, verified against
   fake APScheduler classes (so the wiring logic is tested without requiring
@@ -119,13 +120,20 @@ def test_run_once_with_no_jobs_registered_returns_an_empty_dict():
     assert registry.run_once() == {}
 
 
-# -- build_scheduler: APScheduler is genuinely absent in this environment --
+# -- build_scheduler: APScheduler absent (simulated -- see note below) -----
 
 
-def test_build_scheduler_raises_when_apscheduler_not_installed():
-    """This repo's test environment does not install the 'tower' extra, so
-    this exercises the real guard, not a monkeypatched stand-in."""
-    assert scheduler_module._HAS_APSCHEDULER is False  # sanity: the guard path we're testing is live
+def test_build_scheduler_raises_when_apscheduler_not_installed(monkeypatch):
+    """The 'tower' extra IS installed in this repo's test environment (it's
+    in requirements-dev.txt, needed by the wiring tests below), so this
+    simulates absence via the same _HAS_APSCHEDULER flag those wiring tests
+    flip the other way (_install_fake_apscheduler) rather than relying on
+    the real environment to lack the package -- that assumption broke once
+    CI's requirements-dev.txt was brought in sync with pyproject.toml's
+    extras (2026-07-13), and asserting on ambient install state is fragile
+    regardless. The guard logic itself (build_scheduler reading the flag)
+    is unchanged and still genuinely exercised."""
+    monkeypatch.setattr(scheduler_module, "_HAS_APSCHEDULER", False)
     registry = JobRegistry()
 
     with pytest.raises(SchedulerUnavailableError):
