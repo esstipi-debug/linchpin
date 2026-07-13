@@ -7,10 +7,13 @@ out-of-range allocation) so the human only reviews sound output.
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 
 from src.guided import GuidedOutcome, verify_guided
+from src.sop_engine.coherence import CHECK_BUDGET_FEASIBILITY, CHECK_PROMO_COVERAGE, CHECK_SERVICE_LEVEL
 
+from . import forecast_job
 from .inventory_optimization import JobReport
 from .leadership import DIMS, ChainProfile
 from .pricing import PricingReport
@@ -22,12 +25,17 @@ if TYPE_CHECKING:  # avoid a real circular import: jobs.digest_job -> scm_agent.
     # module load time.
     from .digest_job import DigestResult
 
+    # Same hazard, same fix: jobs.integrated_plan -> scm_agent.knowledge/citation_gate ->
+    # scm_agent (package __init__) -> scm_agent.tools -> `from jobs import qa` -> here.
+    from .integrated_plan import IntegratedPlanBundle
+
     # Same hazard, same fix: jobs.price_intelligence -> src.pricing_intel.sanity ->
     # scm_agent.events -> scm_agent (package __init__) -> scm_agent.tools -> here.
     from .price_intelligence import PriceIntelReport
 
 TOL = 1e-6
 PRICE_INTEL_COVERAGE_MIN = 0.60  # plan section 6.9 item 2: ">=60% SKUs con >=1 competidor confirmado"
+_REQUIRED_INTEGRATED_PLAN_CHECKS = {CHECK_PROMO_COVERAGE, CHECK_BUDGET_FEASIBILITY, CHECK_SERVICE_LEVEL}
 
 
 def verify(report: JobReport) -> list[str]:
@@ -243,3 +251,45 @@ def coverage_gate(outcome: GuidedOutcome) -> list[str]:
 
 def covered(outcome: GuidedOutcome) -> bool:
     return not coverage_gate(outcome)
+
+
+def verify_integrated_plan(bundle: IntegratedPlanBundle) -> list[str]:
+    """QA gate for A5's integrated plan (Linchpin 3.0 PR-20). Empty list =
+    passed. Checks STRUCTURAL soundness (finite numbers, all 3 required
+    coherence-check kinds present, internally-consistent counts) -- a
+    FAILED coherence check is an intended FINDING this deliverable reports
+    to a human (see ``jobs.integrated_plan``'s module docstring), never
+    itself a QA failure that blocks the deliverable.
+    """
+    issues: list[str] = list(forecast_job.verify(bundle.forecast_report))
+    plan = bundle.plan
+
+    if plan.n_skus <= 0:
+        issues.append("integrated_plan: no SKUs in the plan")
+    if plan.n_checks != len(plan.checks):
+        issues.append("integrated_plan: n_checks does not match len(checks)")
+    if plan.n_checks_passed + plan.n_checks_failed != plan.n_checks:
+        issues.append("integrated_plan: n_checks_passed + n_checks_failed != n_checks")
+
+    present_kinds = {c.check for c in plan.checks}
+    missing_kinds = _REQUIRED_INTEGRATED_PLAN_CHECKS - present_kinds
+    if missing_kinds:
+        issues.append(f"integrated_plan: missing required coherence check kind(s): {sorted(missing_kinds)}")
+
+    for line in plan.demand_plan:
+        if not math.isfinite(line.base_forecast) or line.base_forecast < 0:
+            issues.append(f"integrated_plan: {line.product_id}: invalid base_forecast")
+        if not math.isfinite(line.shaped_demand) or line.shaped_demand < 0:
+            issues.append(f"integrated_plan: {line.product_id}: invalid shaped_demand")
+
+    for line in plan.purchase_plan:
+        if not math.isfinite(line.recommended_order) or line.recommended_order < 0:
+            issues.append(f"integrated_plan: {line.product_id}: invalid recommended_order")
+        if not math.isfinite(line.order_value) or line.order_value < 0:
+            issues.append(f"integrated_plan: {line.product_id}: invalid order_value")
+
+    return issues
+
+
+def integrated_plan_passed(bundle: IntegratedPlanBundle) -> bool:
+    return not verify_integrated_plan(bundle)
