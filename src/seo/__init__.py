@@ -1,6 +1,7 @@
-"""Track B -- SEO (Linchpin 3.0 plan section 8). First module: ``crawl_audit``
-(S1 technical SEO audit checks, PR-22). Later PRs add ``schema_gen``/``feeds``/
-``llms_txt`` (S2), ``pdp_writer`` (S3), and ``geo_probe`` (S5) alongside it.
+"""Track B -- SEO (Linchpin 3.0 plan section 8). ``crawl_audit`` (S1 technical
+SEO audit checks, PR-22). ``schema_gen``/``feeds``/``llms_txt`` (S2 schema and
+feed generation from a client's own catalog, PR-23). Later PRs add
+``pdp_writer`` (S3) and ``geo_probe`` (S5) alongside them.
 """
 
 from __future__ import annotations
@@ -40,6 +41,50 @@ from .crawl_audit import (
     robots_and_sitemap_findings,
     run_checks,
 )
+from .feeds import (
+    FEED_GENERATOR,
+    FeedItemResult,
+    GenericJsonFeedReport,
+    MerchantFeedReport,
+    build_generic_json_feed,
+    build_merchant_feed_xml,
+    missing_required_feed_fields,
+    write_excluded_csv,
+    write_generic_json_feed,
+    write_merchant_feed_xml,
+)
+from .llms_txt import (
+    DEFAULT_SECTION,
+    FOOTER_LINE,
+    LlmsPage,
+    LlmsTxtReport,
+    SiteInfo,
+    build_llms_txt,
+    catalog_to_llms_pages,
+    generate_llms_txt,
+    is_valid_llms_txt,
+    missing_required_llms_fields,
+    validate_llms_txt,
+    write_llms_txt,
+)
+from .schema_gen import (
+    SCHEMA_ORG_CONTEXT,
+    VALID_AVAILABILITY,
+    VALID_CONDITION,
+    CatalogItem,
+    CatalogJsonLdReport,
+    ExcludedCatalogItem,
+    GeneratedProduct,
+    build_product_jsonld,
+    catalog_to_jsonld,
+    derive_availability,
+    is_valid_product_jsonld,
+    missing_required_fields,
+    normalize_availability_token,
+    normalize_condition_token,
+    validate_product_jsonld,
+    write_catalog_jsonld,
+)
 
 __all__ = [
     "BROKEN_INTERNAL_LINK",
@@ -75,4 +120,45 @@ __all__ = [
     "find_structured_data_issues",
     "robots_and_sitemap_findings",
     "run_checks",
+    # schema_gen (S2)
+    "SCHEMA_ORG_CONTEXT",
+    "VALID_AVAILABILITY",
+    "VALID_CONDITION",
+    "CatalogItem",
+    "CatalogJsonLdReport",
+    "ExcludedCatalogItem",
+    "GeneratedProduct",
+    "build_product_jsonld",
+    "catalog_to_jsonld",
+    "derive_availability",
+    "is_valid_product_jsonld",
+    "missing_required_fields",
+    "normalize_availability_token",
+    "normalize_condition_token",
+    "validate_product_jsonld",
+    "write_catalog_jsonld",
+    # feeds (S2)
+    "FEED_GENERATOR",
+    "FeedItemResult",
+    "GenericJsonFeedReport",
+    "MerchantFeedReport",
+    "build_generic_json_feed",
+    "build_merchant_feed_xml",
+    "missing_required_feed_fields",
+    "write_excluded_csv",
+    "write_generic_json_feed",
+    "write_merchant_feed_xml",
+    # llms_txt (S2)
+    "DEFAULT_SECTION",
+    "FOOTER_LINE",
+    "LlmsPage",
+    "LlmsTxtReport",
+    "SiteInfo",
+    "build_llms_txt",
+    "catalog_to_llms_pages",
+    "generate_llms_txt",
+    "is_valid_llms_txt",
+    "missing_required_llms_fields",
+    "validate_llms_txt",
+    "write_llms_txt",
 ]
