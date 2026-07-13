@@ -85,11 +85,28 @@ claims list).
   con mas agentes paralelos. Si esto se repite, preferir llamadas directas
   secuenciales sobre relanzar varios agentes a la vez.
 
+**Actualizacion 2026-07-13 (mismo dia, mismo PR #142): dimensionamiento
+extendido a Colombia y Chile + recomendacion de alcance geografico.**
+`documentation/ICP_Y_DIMENSIONAMIENTO.md` §2.6-2.7 ahora cubre las 4
+geografias con fuentes oficiales (Colombia: Decreto 957/Confecamaras;
+Chile: Ley 20.416/SII — el desglose exacto Pequena vs Mediana de Chile no
+se encontro publico esta sesion, quedo como estimado de rango amplio,
+marcado como tal). El pool ICP combinado sube de ~199.000 (solo AR+MX) a
+~367.000 empresas (AR+MX+CO+CL). **Recomendacion de alcance (no ejecutar
+las 4 geografias a la vez):** Fase 1 = piloto en Mexico (el mercado
+individual mas grande, unica senal cualitativa de traccion en el
+ecosistema Odoo) opcionalmente + Argentina via canales calidos; Fase 2 =
+sumar Colombia y Chile una vez calibrado CPL/cierre real; Peru queda como
+candidato sin investigar; **Brasil queda fuera de alcance** hasta que el
+producto tenga soporte de portugues (`src/i18n.py` verificado: solo
+`es`/`en`) — es un bloqueo de producto, no de mercado.
+
 **Que sigue (no arrancado esta sesion):** publicar el modulo Odoo (checklist
 ya lista en `GTM_SUBMISSIONS.md`) para tener el primer canal LATAM medible;
-correr una campana piloto chica para calibrar el embudo real; extender el
-dimensionamiento a Colombia/Chile si LATAM se confirma como prioridad y no
-solo como canal secundario.
+correr una campana piloto chica en Mexico (+ Argentina) para calibrar el
+embudo real antes de expandir a Colombia/Chile; buscar el desglose exacto
+Pequena/Mediana de Chile directo en sii.cl si esa geografia se prioriza
+antes de lo esperado; investigar Peru si se confirma como 5to mercado.
 
 ## 2026-07-12 — Rename: Linchpin -> Kern (interno COMPLETO; checklist EXTERNA abajo)
 
