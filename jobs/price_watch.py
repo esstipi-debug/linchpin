@@ -74,18 +74,39 @@ for why one pipeline must serve every acquisition tier). Registered as
 ``run_once()``-in-tests, no-daemon-no-sleep discipline as
 ``jobs.price_monitor.PRICE_MONITOR_JOB`` (golden rule 9).
 
-Scoping which confirmed pairs this cycle should touch needs no new tag:
-``SkuMap.list_all_confirmed()`` enumerates every confirmed pair across the
-WHOLE store (any site, any match method), and the per-pair
-``SiteConfig.max_tier_allowed`` ceiling check (identical to
-``price_intelligence._acquire_one``'s own) is what naturally separates a
-site this cycle should re-acquire at L1 from one it must not touch -- e.g.
-a MercadoLibre pair confirmed for ``jobs.price_monitor``'s own L0 poll is
-approved only to L0 (``config/sites/meli-api.test.yaml``), so this cycle's
-L1 attempt against it is honestly reported ``skipped: tier_not_approved``,
-never fetched and never silently escalated (raising a site's approved
-ceiling is explicitly a LATER PR's concern, not this cycle's -- it only
-ever skips honestly here).
+LIMITATION -- scoping to "confirmed discovery pairs" is INCIDENTAL, not
+enforced: ``SkuMap.list_all_confirmed()`` enumerates every confirmed pair
+across the WHOLE store (any site, any match method) -- ``SkuMapEntry``
+carries no provenance/source field distinguishing a discovery-onboarded
+pair from one confirmed through some other path. This cycle relies on the
+per-pair ``SiteConfig.max_tier_allowed`` ceiling check (identical to
+``price_intelligence._acquire_one``'s own) to keep a pair like
+MercadoLibre's -- confirmed for ``jobs.price_monitor``'s own L0 poll, and
+approved only to L0 (``config/sites/meli-api.test.yaml``) -- out of this
+L1 cycle: that L1 attempt is honestly reported ``skipped:
+tier_not_approved``, never fetched and never silently escalated (raising
+a site's approved ceiling is explicitly a LATER PR's concern, not this
+cycle's).
+
+That separation, however, is a CURRENT, ACCIDENTAL fact of today's
+codebase, not a structural guarantee. As of this writing the ONLY writer
+of ``status="confirmed"`` rows anywhere in ``sku_map`` is this module's
+own :func:`run_homologation` (Task 5). Both
+``src/pricing_intel/match/sku_map.py`` and
+``src/pricing_intel/match/adjudicate.py`` explicitly document and
+anticipate a SECOND write path -- a human "manual T2 review" or an
+operator accepting an LLM-adjudicated match proposal -- that could call
+``SkuMap.record(status="confirmed", ...)`` directly against ANY site a
+human has approved to L1 or higher, not just a discovery-onboarded one.
+If/when that second write path ships, a non-discovery confirmed pair on
+an L1+-approved site would pass this cycle's tier-ceiling check and be
+silently swept up and re-acquired here too, since nothing on
+``SkuMapEntry``/``list_all_confirmed()`` marks it as out of this cycle's
+scope. Fixing that (a provenance/source tag on ``SkuMapEntry``, or some
+other explicit allow-list) is a schema/design decision for a human to
+make in a dedicated follow-up PR -- deliberately NOT invented
+unilaterally here (the original Task 6 brief's own instruction was to
+escalate rather than invent a new tagging mechanism unilaterally).
 """
 
 from __future__ import annotations
@@ -602,10 +623,11 @@ def run_price_watch_cycle(
 ) -> PriceWatchCycleReport:
     """One full continuous-monitoring cycle: every ``sku_map`` pair with
     ``status == "confirmed"`` (across the WHOLE store -- any site, any match
-    method, see this module's own docstring for why no separate "discovery
-    site" tag is needed) -> re-acquire via the L1 structured-data PDP path
-    -> the shared sanity/ledger/market-signal pipeline
-    (:func:`jobs.price_monitor.accept_observation`).
+    method; see this module's own docstring LIMITATION note -- today's
+    tier-ceiling-only scoping is an incidental, unenforced fact of the
+    current codebase, not a structural guarantee) -> re-acquire via the L1
+    structured-data PDP path -> the shared sanity/ledger/market-signal
+    pipeline (:func:`jobs.price_monitor.accept_observation`).
 
     Golden rule 9 ("todo componente continuo degrada a batch"): a plain,
     all-default-kwargs, synchronous function -- directly callable in a test,
