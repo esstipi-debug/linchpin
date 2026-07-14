@@ -33,6 +33,7 @@ from jobs import (
     multi_echelon_job,
     newsvendor_job,
     odoo_job,
+    price_watch_deliverable,
     qa,
     queuing_job,
     reconciliation_job,
@@ -2008,6 +2009,89 @@ def price_intelligence_tool() -> Tool:
     )
 
 
+# ---- price_watch (discovery-assisted continuous monitoring) -----------------
+#
+# Same lazy-import hazard as price_intelligence_tool() above, for TWO reasons:
+# `jobs.price_watch` imports `scm_agent.events` directly, and `jobs.price_priority`
+# imports `jobs.price_intelligence` (which itself imports `scm_agent.citation_gate`/
+# `scm_agent.events`/`scm_agent.knowledge` at top level) -- either import at this
+# module's top level would recreate the exact circular-import hazard documented
+# above. Every function below does its own local import instead. (`price_watch_
+# deliverable` is safe to import eagerly -- see that module's own docstring for
+# why it carries none of this hazard.)
+
+
+def _price_watch_prepare(request: JobRequest, provider: LLMProvider) -> Prepared:
+    from jobs import price_watch
+
+    seed_url = request.params.get("seed_url") or request.data_path
+    if not seed_url:
+        return Prepared(
+            status="needs_data",
+            messages=["a competitor category/product-listing seed_url is required (params['seed_url'])"],
+        )
+    payload = price_watch.prepare(str(seed_url), request.params)
+    if payload["skipped_reason"]:
+        return Prepared(status="needs_data", messages=[f"site gate refused the crawl: {payload['skipped_reason']}"])
+    if not payload["discovered"]:
+        return Prepared(status="needs_data", messages=[
+            f"no product page(s) discovered at {payload['domain']} ({payload['pages_crawled']} page(s) crawled)"
+        ])
+    return Prepared(status="ok", payload=payload)
+
+
+def _price_watch_run(payload: object, params: dict) -> Produced:
+    from jobs import price_watch
+
+    now = params.get("now")
+    homologation = price_watch.run_homologation(
+        {
+            **payload,
+            "our_catalog": params.get("our_catalog") or [],
+            "our_gtins": params.get("our_gtins"),
+            "llm": params.get("llm"),
+        },
+        sku_map=params.get("sku_map"),
+        now=now,
+    )
+    cycle = price_watch.run_price_watch_cycle(
+        sku_map=params.get("sku_map"),
+        ledger=params.get("ledger"),
+        event_ledger=params.get("event_ledger"),
+        http_client=params.get("http_client"),
+        sites_config_dir=params.get("sites_config_dir"),
+        scaling_request_for=params.get("scaling_request_for"),
+        now=now,
+    )
+    summary = (
+        f"Discovery crawl at {payload['domain']}: {len(payload['discovered'])} product page(s) found, "
+        f"{homologation.n_confirmed} confirmed / {homologation.n_suspect} suspect match(es). {cycle.summary}"
+    )
+    return Produced(report=cycle, summary=summary)
+
+
+def price_watch_tool() -> Tool:
+    return Tool(
+        key="price_watch",
+        title="Discovery-Assisted Price Watch",
+        description="Auto-onboard a never-seen competitor site (robots.txt-only, limited tier), crawl "
+                    "and homologate its product pages against your own catalog, then re-acquire and "
+                    "monitor the confirmed pairs on a recurring cadence - read-only observation; a tier "
+                    "raise beyond the approved ceiling is never applied automatically.",
+        intent_keywords=(
+            "price watch cycle", "recurring competitor price watch", "competitor price discovery",
+            "discovery-assisted competitor watch", "vigila los precios de la competencia",
+            "descubre productos de la competencia", "homologa productos competencia",
+        ),
+        requires_data=False,
+        options=tool_options.price_watch_options,
+        prepare=_price_watch_prepare,
+        run=_price_watch_run,
+        qa=lambda report: qa.verify_price_watch(report),
+        deliver=lambda report, out_dir, client: price_watch_deliverable.write_operational(report, out_dir, client),
+    )
+
+
 def build_default_registry() -> ToolRegistry:
     reg = ToolRegistry()
     reg.register(inventory_tool())
@@ -2049,4 +2133,5 @@ def build_default_registry() -> ToolRegistry:
     reg.register(drp_tool())
     reg.register(vehicle_routing_tool())
     reg.register(price_intelligence_tool())
+    reg.register(price_watch_tool())
     return reg
