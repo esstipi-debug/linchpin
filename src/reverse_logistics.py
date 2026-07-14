@@ -95,10 +95,6 @@ def best_disposition(line: ReturnLine, rates: DispositionRates) -> LineDispositi
     return LineDisposition(line, tuple(options_for(line, rates)))
 
 
-def total_returned_units(lines: list[ReturnLine]) -> float:
-    return sum(ln.returned_units for ln in lines)
-
-
 def returns_value_at_cost(lines: list[ReturnLine]) -> float:
     """Original cost value tied up in the returns - the value at risk."""
     return sum(ln.returned_units * ln.unit_cost for ln in lines)
