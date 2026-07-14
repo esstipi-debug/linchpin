@@ -78,10 +78,6 @@ def verify(report: JobReport) -> list[str]:
     return issues
 
 
-def passed(report: JobReport) -> bool:
-    return not verify(report)
-
-
 def verify_pricing(report: PricingReport) -> list[str]:
     """Return a list of QA issues for a pricing report. Empty list = passed."""
     issues: list[str] = []
@@ -106,10 +102,6 @@ def verify_pricing(report: PricingReport) -> list[str]:
             issues.append(f"{r.product_id}: insufficient data but an optimal price was set")
 
     return issues
-
-
-def pricing_passed(report: PricingReport) -> bool:
-    return not verify_pricing(report)
 
 
 def verify_leadership(profile: ChainProfile) -> list[str]:
