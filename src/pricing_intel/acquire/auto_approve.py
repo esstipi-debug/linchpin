@@ -166,9 +166,14 @@ def auto_approve_site(
 
     Never touches the network except through the single seam described in
     :func:`_check_robots`. Returns without writing anything for an
-    unresolvable ``url`` (reason ``"invalid_url"``), an already-existing
-    config of any approval status (reason ``"config_already_exists"``), or a
-    robots.txt disallow (reason mentions ``"robots_disallow"``); writes
+    unresolvable ``url`` (reason ``"invalid_url"``), a domain containing
+    characters ``base._config_path`` refuses (a port, userinfo, or any other
+    character outside its safe-hostname regex; reason
+    ``"invalid_domain_characters"``) -- ``base.normalize_domain`` does NOT
+    reject these itself, so this is a second, explicit boundary check rather
+    than an uncaught ``ValueError`` -- an already-existing config of any
+    approval status (reason ``"config_already_exists"``), or a robots.txt
+    disallow (reason mentions ``"robots_disallow"``); writes
     ``config/sites/<domain>.yaml`` and re-loads it through
     ``base.load_site_config`` only on a clean robots.txt allow.
     """
@@ -176,7 +181,15 @@ def auto_approve_site(
     if domain is None:
         return OnboardingResult(None, False, None, "invalid_url")
 
-    config_path = base._config_path(domain, config_dir)
+    try:
+        config_path = base._config_path(domain, config_dir)
+    except ValueError:
+        # base._config_path's _SAFE_DOMAIN regex rejects a port, userinfo, or
+        # any other character normalize_domain lets through -- a rejection,
+        # never an uncaught exception (no silent caps: still returns a
+        # machine-readable reason, just for a different failure mode).
+        return OnboardingResult(domain, False, None, "invalid_domain_characters")
+
     existing_result = _existing_config_result(domain, config_dir, config_path)
     if existing_result is not None:
         return existing_result

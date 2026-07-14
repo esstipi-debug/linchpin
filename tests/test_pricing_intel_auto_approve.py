@@ -143,6 +143,45 @@ def test_id_only_or_malformed_url_rejected(tmp_path: Path, bad_url: str) -> None
     assert list(tmp_path.iterdir()) == []
 
 
+# -- domain with characters _config_path rejects (port, userinfo) is a clean --
+# -- rejection, never an uncaught exception (review finding 2) ----------------
+
+
+def test_domain_with_port_is_rejected_not_raised(tmp_path: Path) -> None:
+    # normalize_domain does NOT strip a port from netloc, so this reaches
+    # base._config_path's _SAFE_DOMAIN check, which disallows ":" -- must be
+    # a clean rejection, not an uncaught ValueError.
+    result = auto_approve_site(
+        "https://example.com:8080/p/1",
+        config_dir=tmp_path,
+        robots_reader=lambda robots_url, user_agent: True,
+        now=NOW,
+    )
+
+    assert result.domain == "example.com:8080"
+    assert result.approved is False
+    assert result.config_path is None
+    assert result.reason == "invalid_domain_characters"
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_domain_with_userinfo_is_rejected_not_raised(tmp_path: Path) -> None:
+    # normalize_domain does NOT strip userinfo from netloc either, so this
+    # also reaches base._config_path's _SAFE_DOMAIN check (disallows "@").
+    result = auto_approve_site(
+        "https://user:pass@site.test/p/1",
+        config_dir=tmp_path,
+        robots_reader=lambda robots_url, user_agent: True,
+        now=NOW,
+    )
+
+    assert result.domain == "user:pass@site.test"
+    assert result.approved is False
+    assert result.config_path is None
+    assert result.reason == "invalid_domain_characters"
+    assert list(tmp_path.iterdir()) == []
+
+
 # -- existing config is never overwritten --------------------------------------
 
 
@@ -202,6 +241,27 @@ def test_robots_no_crawl_delay_uses_safe_default(tmp_path: Path, monkeypatch: py
 
 
 # -- required SiteConfig fields are populated (guards __post_init__ ValueError) -
+
+
+# -- committed fixture: config/sites/discovered-retailer.test.yaml ------------
+# Sibling to example-retailer.test.yaml (human-reviewed "limited") and
+# example-blocked.test.yaml (human-reviewed "prohibited") -- this one
+# demonstrates the AUTO-onboarded shape auto_approve_site() writes on a
+# robots.txt allow. See tests/test_pricing_intel_acquire_base.py's
+# test_approved_domain_loads_and_is_approved for the sibling "loads cleanly"
+# pattern this mirrors.
+
+
+def test_discovered_retailer_fixture_loads_as_auto_onboarded_limited() -> None:
+    config = load_site_config("discovered-retailer.test", config_dir="config/sites")
+
+    assert config.domain == "discovered-retailer.test"
+    assert config.tos_decision == "limited"
+    assert config.max_tier_allowed == "L1"
+    assert config.tos_summary == AUTO_TOS_SUMMARY
+    assert config.robots_txt_respected is True
+    assert config.pii_policy == "none"
+    assert config.is_approved is True
 
 
 def test_required_siteconfig_fields_populated(tmp_path: Path) -> None:
