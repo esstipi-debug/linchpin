@@ -86,7 +86,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from src.deliverable import Branding, DEFAULT_BRANDING
+from src.deliverable import DEFAULT_BRANDING, Branding
 from src.seo.schema_gen import CatalogItem, ExcludedCatalogItem
 
 DEFAULT_SECTION = "Products"
@@ -326,7 +326,7 @@ from xml.dom import minidom
 
 import pandas as pd
 
-from src.deliverable import Branding, DEFAULT_BRANDING
+from src.deliverable import DEFAULT_BRANDING, Branding
 from src.export import write_summary_csv
 from src.seo.schema_gen import (
     CatalogItem,
