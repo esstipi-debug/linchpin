@@ -222,6 +222,59 @@ def test_crawl_adapter_uses_robotstxt_obey_and_identifiable_ua(
     assert captured["xpath_selectors"] == {"page_html": "/html"}
 
 
+def test_prepare_floors_download_delay_at_default_even_when_site_rate_limit_is_zero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A domain's own approved ``rate_limit_seconds`` (e.g. a real
+    ``Crawl-delay: 0`` robots.txt, self-onboarded by ``auto_approve_site``)
+    must NEVER push the crawl's actual ``DOWNLOAD_DELAY`` below
+    ``DEFAULT_DOWNLOAD_DELAY_SECONDS`` -- this crawl targets a THIRD-PARTY
+    site under the no-evasion non-goal; it must never be tuned up to run "as
+    fast as possible" just because the target site's own declared rate
+    happens to allow it. Asserted directly on the ``custom_settings`` dict
+    passed to the (faked) ``advertools.crawl`` call, same pattern as
+    ``test_crawl_adapter_uses_robotstxt_obey_and_identifiable_ua``.
+    """
+    domain = "zero-delay.example.test"
+    seed_url = f"https://{domain}/"
+    # A pre-existing, already-approved config with rate_limit_seconds=0.0 --
+    # simulates a site whose own robots.txt declared `Crawl-delay: 0`.
+    # auto_approve_site() is non-destructive against an existing config, so
+    # this is read back verbatim by gate 1 AND gate 2 -- no robots_reader
+    # stub needed.
+    (tmp_path / f"{domain}.yaml").write_text(
+        f"domain: {domain}\n"
+        "robots_txt_respected: true\n"
+        "robots_checked_at: '2026-07-01'\n"
+        "tos_summary: 'auto-approved via robots.txt'\n"
+        "tos_decision: limited\n"
+        "rate_limit_seconds: 0.0\n"
+        "max_tier_allowed: L1\n"
+        "pii_policy: none\n",
+        encoding="utf-8",
+    )
+
+    captured: dict = {}
+
+    class _FakeAdvertools:
+        @staticmethod
+        def crawl(url_list, output_file_path, **kwargs):
+            captured.update(kwargs)
+            # deliberately writes nothing -- _crawl_domain degrades to an
+            # empty DataFrame, irrelevant to this test.
+
+    monkeypatch.setitem(sys.modules, "advertools", _FakeAdvertools())
+
+    result = pw.prepare(seed_url, {"config_dir": tmp_path})
+
+    assert result["skipped_reason"] is None
+    assert result["site_config"] is not None
+    assert result["site_config"].rate_limit_seconds == 0.0
+    settings = captured["custom_settings"]
+    assert settings["DOWNLOAD_DELAY"] == pw.DEFAULT_DOWNLOAD_DELAY_SECONDS
+    assert settings["DOWNLOAD_DELAY"] >= pw.DEFAULT_DOWNLOAD_DELAY_SECONDS
+
+
 def test_crawl_domain_raises_a_clear_error_when_advertools_is_unavailable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

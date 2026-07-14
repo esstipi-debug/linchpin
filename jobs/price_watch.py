@@ -68,7 +68,12 @@ from src.pricing_intel.discover import DiscoveredProduct, filter_product_pages
 # Same politeness posture as jobs/seo_audit.py::_crawl_domain -- a small,
 # fixed per-request delay and a low per-domain concurrency, never tuned up
 # to "as fast as possible". prepare() prefers the domain's OWN approved
-# SiteConfig.rate_limit_seconds when available; this is only the fallback.
+# SiteConfig.rate_limit_seconds when available, but this is an unconditional
+# FLOOR, not just a fallback: this crawl targets a THIRD-PARTY site under the
+# no-evasion non-goal, so neither that site's own (possibly zero, e.g. a
+# `Crawl-delay: 0` robots.txt auto-approved by Task 1) rate_limit_seconds nor
+# an explicit params["download_delay"] override may ever push the actual
+# DOWNLOAD_DELAY below this value -- see _resolve_download_delay().
 DEFAULT_DOWNLOAD_DELAY_SECONDS = 0.5
 DEFAULT_CONCURRENT_REQUESTS_PER_DOMAIN = 2
 DEFAULT_CRAWL_OUTPUT_FILE = Path("data") / "price_watch_crawl.jl"
@@ -122,6 +127,20 @@ def _crawl_domain(
     return pd.read_json(output_file, lines=True)
 
 
+def _resolve_download_delay(params: dict, site_config: base.SiteConfig) -> float:
+    """The crawl's actual ``DOWNLOAD_DELAY`` -- the domain's own approved
+    ``SiteConfig.rate_limit_seconds`` (or an explicit
+    ``params["download_delay"]`` override) UNCONDITIONALLY floored at
+    :data:`DEFAULT_DOWNLOAD_DELAY_SECONDS`. Neither a site's own declared
+    rate (which could be ``0.0`` -- e.g. a real ``Crawl-delay: 0`` robots.txt
+    auto-approved by Task 1) nor a caller-supplied override may resolve
+    faster than this floor: this crawl targets a THIRD-PARTY site under the
+    no-evasion non-goal, never the client's own site, so there is no
+    legitimate reason to ever run it "as fast as possible"."""
+    requested = float(params.get("download_delay", site_config.rate_limit_seconds))
+    return max(requested, DEFAULT_DOWNLOAD_DELAY_SECONDS)
+
+
 def _skip(domain: str | None, onboarding: OnboardingResult, reason: str) -> dict:
     """The honest, no-crawl skip shape shared by both gate failures --
     always a machine-readable ``skipped_reason``, never a bare empty result."""
@@ -149,7 +168,10 @@ def prepare(seed_url: str, params: dict | None = None) -> dict:
         :func:`auto_approve_site` (the test seam that keeps onboarding fully
         offline).
       - ``follow_links`` (default True), ``download_delay`` (defaults to
-        the approved ``SiteConfig.rate_limit_seconds``),
+        the approved ``SiteConfig.rate_limit_seconds``; see
+        :func:`_resolve_download_delay` -- this default AND any explicit
+        override are unconditionally floored at
+        ``DEFAULT_DOWNLOAD_DELAY_SECONDS``, never allowed to run faster),
         ``concurrent_requests_per_domain``, ``scrapy_log_level`` (default
         "ERROR"), ``crawl_output_file``.
     """
@@ -176,7 +198,7 @@ def prepare(seed_url: str, params: dict | None = None) -> dict:
         output_file=output_file,
         follow_links=bool(params.get("follow_links", True)),
         user_agent=user_agent,
-        download_delay=float(params.get("download_delay", site_config.rate_limit_seconds)),
+        download_delay=_resolve_download_delay(params, site_config),
         concurrent_requests_per_domain=int(
             params.get("concurrent_requests_per_domain", DEFAULT_CONCURRENT_REQUESTS_PER_DOMAIN)
         ),
