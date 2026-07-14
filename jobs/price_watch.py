@@ -127,16 +127,13 @@ from src.export import write_summary_csv
 from src.guided import GuidedOutcome
 from src.pricing_intel.acquire import base
 from src.pricing_intel.acquire.auto_approve import OnboardingResult, auto_approve_site
+from src.pricing_intel.acquire.l1 import AcquisitionSkipped, acquire_l1_offer
 from src.pricing_intel.acquire.pdp_fetcher import USER_AGENT as DEFAULT_USER_AGENT
-from src.pricing_intel.acquire.pdp_fetcher import FetchError, fetch_pdp_html
 from src.pricing_intel.discover import DiscoveredProduct, filter_product_pages
-from src.pricing_intel.extract import ExtractionFailed, extract_price
 from src.pricing_intel.homologate import HomologationReport, HomologationRow, homologate
 from src.pricing_intel.ledger import PriceLedger, default_ledger
 from src.pricing_intel.match.sku_map import SkuMap, SkuMapEntry, default_sku_map
-from src.pricing_intel.models import ACQUISITION_TIERS, MatchCandidate
-from src.pricing_intel.normalize import detect_promo
-from src.pricing_intel.sanity import RawOfferCandidate
+from src.pricing_intel.models import MatchCandidate
 
 from .price_watch_scaling import ScaledWatch, SkuScalingRequest, _scale_one
 from .scheduler import ScheduledJob
@@ -514,98 +511,55 @@ def _check_one_pair(
     sites_config_dir: str | Path | None,
     now: datetime,
 ) -> PairOutcome:
-    """Re-acquire one CONFIRMED ``sku_map`` pair via the L1 structured-data
-    PDP path -- the EXACT same require_approved_site -> tier-ceiling ->
-    CircuitBreaker -> fetch -> classify_blocking_signal -> extract discipline
-    as ``jobs.price_intelligence.py``'s own ``_acquire_one`` (never
-    reinvented; ``site_configs``/``breakers`` are per-cycle caches keyed by
-    domain, the identical shape that function uses so a domain with multiple
-    confirmed pairs shares ONE ``SiteConfig``/``CircuitBreaker`` for the
-    whole cycle rather than re-loading/re-constructing per pair).
+    """Re-acquire one CONFIRMED ``sku_map`` pair via the shared
+    ``src.pricing_intel.acquire.l1.acquire_l1_offer`` prefix (final whole-
+    branch review, Finding 2 -- this function used to carry the gate/tier/
+    breaker/fetch/classify/extract sequence inline, near-verbatim with
+    ``jobs.price_intelligence._acquire_one``'s own copy; both now call the
+    same shared helper. ``site_configs``/``breakers`` are per-cycle caches
+    keyed by domain -- unchanged shape, so a domain with multiple confirmed
+    pairs still shares ONE ``SiteConfig``/``CircuitBreaker`` for the whole
+    cycle).
 
     The final sanity-gate -> ledger-append -> market-signal-event decision
     is made ENTIRELY by :func:`jobs.price_monitor.accept_observation` --
-    this function only assembles the :class:`RawOfferCandidate` and hands it
-    off; it never itself decides accepted/quarantined/discarded (that
-    decision, and every ``Event`` reported back, always originates from
-    ``accept_observation``, converged exactly as the task brief requires).
+    this function's OWN divergent tail (everything past a successful
+    extraction) only hands the acquired candidate off to it; it never itself
+    decides accepted/quarantined/discarded (that decision, and every
+    ``Event`` reported back, always originates from ``accept_observation``,
+    converged exactly as Task 6 requires).
     """
     base_fields = dict(site=entry.site, competitor_sku_ref=entry.competitor_sku_ref, matched_product_id=entry.our_product_id)
 
-    cached = _resolve_site_config(
-        entry, site_configs=site_configs, breakers=breakers, sites_config_dir=sites_config_dir
+    acquired = acquire_l1_offer(
+        site=entry.site, competitor_ref=entry.competitor_sku_ref, matched_product_id=entry.our_product_id,
+        match_confidence=1.0,  # sku_map already CONFIRMED this pair
+        client=client, now=now, site_configs=site_configs, breakers=breakers,
+        sites_config_dir=sites_config_dir, event_ledger=event_ledger,
     )
-    if isinstance(cached, Exception):
-        return PairOutcome(**base_fields, status="skipped", reason=f"site_not_approved:{type(cached).__name__}")
-    config = cached
-    # This cycle only ever re-acquires at L1 (structured-data PDP
-    # extraction) -- a domain approved only up to L0 (e.g. a MercadoLibre
-    # pair confirmed for jobs.price_monitor's own scheduled poll, see this
-    # module's docstring) must not be touched here even though its ToS/
-    # robots decision is otherwise "approved". Honestly skipped, NEVER
-    # silently escalated to try anyway -- raising a site's own ceiling is
-    # explicitly a later PR's concern, not this cycle's.
-    if ACQUISITION_TIERS.index("L1") > ACQUISITION_TIERS.index(config.max_tier_allowed):
-        return PairOutcome(**base_fields, status="skipped", reason="tier_not_approved")
-    breaker = breakers[entry.site]
+    if isinstance(acquired, AcquisitionSkipped):
+        if acquired.reason == "extraction_failed":
+            # This module's OWN extraction_failed event shape (source/payload
+            # keys) -- the shared prefix deliberately never emits this event
+            # itself (see acquire_l1_offer's own docstring).
+            if event_ledger is not None:
+                event_ledger.emit(Event(
+                    type="extraction_failed", severity="warning", source=SOURCE,
+                    dedup_key=f"extraction_failed:{entry.site}:{entry.competitor_sku_ref}:{now.isoformat()}",
+                    sku=entry.our_product_id,
+                    payload={
+                        "site": entry.site, "competitor_sku_ref": entry.competitor_sku_ref,
+                        "attempts": list(acquired.extraction_attempts or ()),
+                    },
+                    ts=now,
+                ))
+        return PairOutcome(**base_fields, status="skipped", reason=acquired.reason)
 
-    if not breaker.allow_request(now):
-        return PairOutcome(**base_fields, status="skipped", reason="circuit_open")
-
-    result = fetch_pdp_html(entry.competitor_sku_ref, client=client, now=now)
-    if isinstance(result, FetchError):
-        # A transport-level failure is NOT a blocking signal
-        # (classify_blocking_signal's own docstring) -- an ordinary
-        # transient failure must not trip the breaker, and is never retried
-        # within this cycle (the next scheduled cycle is the only retry).
-        return PairOutcome(**base_fields, status="skipped", reason=f"fetch_error:{result.reason}")
-
-    blocking = base.classify_blocking_signal(status_code=result.status_code, html=result.html)
-    if blocking is not None:
-        # Degrade-only, NEVER a retry (NON-GOAL 1): one failed attempt is
-        # recorded against the breaker and this pair is honestly skipped --
-        # no second request against the same URL happens in this cycle.
-        breaker.record_failure(reason=blocking, now=now, ledger=event_ledger)
-        return PairOutcome(**base_fields, status="skipped", reason=f"blocked:{blocking}")
-    breaker.record_success()
-
-    if result.html is None or result.status_code != 200:
-        return PairOutcome(**base_fields, status="skipped", reason=f"fetch_failed:status_{result.status_code}")
-
-    try:
-        extraction = extract_price(result.html)
-    except ExtractionFailed as exc:
-        if event_ledger is not None:
-            event_ledger.emit(Event(
-                type="extraction_failed", severity="warning", source=SOURCE,
-                dedup_key=f"extraction_failed:{entry.site}:{entry.competitor_sku_ref}:{now.isoformat()}",
-                sku=entry.our_product_id,
-                payload={"site": entry.site, "competitor_sku_ref": entry.competitor_sku_ref, "attempts": list(exc.attempts)},
-                ts=now,
-            ))
-        return PairOutcome(**base_fields, status="skipped", reason="extraction_failed")
-
-    # A price successfully extracted from a live PDP but with no stated
-    # availability is assumed InStock -- same documented business assumption
-    # as jobs.price_intelligence._acquire_one (see that function's own
-    # comment); selector/price-parser cascade tiers never state availability
-    # at all.
-    availability = extraction.availability or "InStock"
-    candidate = RawOfferCandidate(
-        observed_at=now, site=entry.site, competitor_sku_ref=entry.competitor_sku_ref,
-        matched_product_id=entry.our_product_id, match_confidence=1.0,  # sku_map already CONFIRMED this pair
-        price=extraction.price, currency=extraction.currency, price_normalized=None,
-        shipping=None, availability=availability,
-        promo_flag=detect_promo(extraction.price, extraction.list_price),
-        list_price=extraction.list_price, acquisition_tier="L1",
-        extractor=extraction.extractor, extractor_version=extraction.extractor_version,
-        extraction_confidence=extraction.confidence,
-    )
     # CONVERGE HERE (the task's one CRITICAL invariant): every sanity-gate ->
     # ledger-append -> market-signal-event decision for this candidate is
     # made by the SAME accept_observation() jobs.price_monitor's own L0 path
     # calls -- this function never re-implements any part of that pipeline.
-    outcome = accept_observation(candidate, ledger=ledger, event_ledger=event_ledger)
+    outcome = accept_observation(acquired.candidate, ledger=ledger, event_ledger=event_ledger)
     return PairOutcome(**base_fields, status=outcome.status, reason=outcome.reason, events=outcome.events)
 
 
