@@ -31,6 +31,8 @@ Guarantees under test:
 """
 from __future__ import annotations
 
+import threading
+import time
 from datetime import datetime, timezone
 
 import pytest
@@ -114,7 +116,14 @@ def isolated_scheduled_jobs(tmp_path, monkeypatch):
     disable rate limiting/API-key auth by default -- individual tests opt
     back into the API-key gate where they test it. Does NOT touch
     production_registry() -- each test below monkeypatches that itself, so
-    the exact fake job behavior is visible right at the call site."""
+    the exact fake job behavior is visible right at the call site.
+
+    Fix round 1 also added module-level throttle/lock state
+    (``_SCHEDULED_JOBS_LAST_STARTED_AT`` / ``_SCHEDULED_JOBS_LOCK``) that
+    persists across tests in this same process -- reset both to a
+    cold-start state on every test so one test's run can never throttle or
+    lock out the next (a stale lock left over from a crashed/timed-out
+    prior test would otherwise wedge every later test with a 409)."""
     events_path = tmp_path / "events.sqlite3"
     state_path = tmp_path / "state"
     monkeypatch.setattr(appmod, "EVENTS_LEDGER_PATH", str(events_path))
@@ -122,6 +131,8 @@ def isolated_scheduled_jobs(tmp_path, monkeypatch):
     security.reset_rate_limit()
     monkeypatch.setattr(security, "RATE_LIMIT", 0)
     monkeypatch.setattr(security, "API_KEY", "")
+    monkeypatch.setattr(appmod, "_SCHEDULED_JOBS_LAST_STARTED_AT", None)
+    monkeypatch.setattr(appmod, "_SCHEDULED_JOBS_LOCK", threading.Lock())
     return events_path, state_path
 
 
@@ -253,3 +264,191 @@ def test_one_job_failure_is_reported_without_hiding_the_other_jobs_result(isolat
     assert body["jobs"]["price_monitor_cycle"]["status"] == "error"
     assert "RuntimeError" in body["jobs"]["price_monitor_cycle"]["error"]
     assert body["jobs"]["price_watch_cycle"]["status"] == "ok"
+
+
+# -- fix round 1: throttle / concurrency guard / dedicated executor / error text --
+#
+# Before fix round 1, none of the five behaviors below existed: every request
+# below would have re-run both real jobs (throttle test), run two overlapping
+# cycles concurrently (lock test), reflected the raw exception string verbatim
+# (error-text test), potentially executed on a different shared-pool thread
+# each time (dedicated-thread test), or hung the caller indefinitely on a
+# stuck job (timeout test). Each test asserts the specific behavior that
+# closes its corresponding review finding.
+
+
+def test_second_call_within_min_interval_is_throttled_without_rerunning_jobs(isolated_scheduled_jobs, monkeypatch):
+    """Critical finding: no endpoint-level throttle/minimum-interval existed,
+    so a looping caller could re-trigger real outbound crawling on every
+    request. A 429 must be returned BEFORE any job runs a second time."""
+    monkeypatch.setattr(appmod, "SCHEDULED_JOBS_MIN_INTERVAL_SECONDS", 300)
+    call_count = {"monitor": 0, "watch": 0}
+
+    def _monitor():
+        call_count["monitor"] += 1
+        return _fake_monitor_report()
+
+    def _watch():
+        call_count["watch"] += 1
+        return _fake_watch_report()
+
+    monkeypatch.setattr(appmod, "production_registry", lambda: _fake_registry(_monitor, _watch))
+
+    first = client.post("/api/jobs/run-scheduled")
+    assert first.status_code == 200
+    assert call_count == {"monitor": 1, "watch": 1}
+
+    second = client.post("/api/jobs/run-scheduled")
+    assert second.status_code == 429
+    assert "Retry-After" in second.headers
+    # the throttle must reject BEFORE any outbound work happens again
+    assert call_count == {"monitor": 1, "watch": 1}
+
+
+def test_call_arriving_after_the_interval_elapses_is_allowed_again(isolated_scheduled_jobs, monkeypatch):
+    """The throttle is a floor, not a permanent lockout -- once
+    SCHEDULED_JOBS_MIN_INTERVAL_SECONDS has genuinely elapsed, a new call
+    must succeed and run the jobs again."""
+    monkeypatch.setattr(appmod, "SCHEDULED_JOBS_MIN_INTERVAL_SECONDS", 1)
+    monkeypatch.setattr(
+        appmod, "production_registry",
+        lambda: _fake_registry(lambda: _fake_monitor_report(), lambda: _fake_watch_report()),
+    )
+
+    assert client.post("/api/jobs/run-scheduled").status_code == 200
+    assert client.post("/api/jobs/run-scheduled").status_code == 429
+
+    time.sleep(1.05)
+
+    assert client.post("/api/jobs/run-scheduled").status_code == 200
+
+
+def test_concurrent_call_while_a_run_is_in_flight_is_rejected_without_double_running(
+    isolated_scheduled_jobs, monkeypatch,
+):
+    """Important finding #1/#2: no in-process lock guarded against overlapping
+    calls, so two overlapping requests (an overlapping manual retry plus a
+    cron tick, a double-firing probe) could run two real cycles at once --
+    double outbound fetches, and (in production) a cross-thread sqlite race
+    on the default_ledger()/default_sku_map() singletons. A second call that
+    arrives while the first is still running must get 409 and never invoke
+    the job a second time."""
+    monkeypatch.setattr(appmod, "SCHEDULED_JOBS_MIN_INTERVAL_SECONDS", 0)
+    started = threading.Event()
+    release = threading.Event()
+    call_count = {"monitor": 0}
+
+    def _slow_monitor():
+        call_count["monitor"] += 1
+        started.set()
+        assert release.wait(timeout=5), "test setup error: release was never signaled"
+        return _fake_monitor_report()
+
+    monkeypatch.setattr(
+        appmod, "production_registry",
+        lambda: _fake_registry(_slow_monitor, lambda: _fake_watch_report()),
+    )
+
+    results: dict[str, object] = {}
+
+    def _first_call() -> None:
+        results["first"] = client.post("/api/jobs/run-scheduled")
+
+    first_thread = threading.Thread(target=_first_call)
+    first_thread.start()
+    assert started.wait(timeout=5), "first call never entered the job"
+
+    second = client.post("/api/jobs/run-scheduled")
+    assert second.status_code == 409
+
+    release.set()
+    first_thread.join(timeout=5)
+    assert not first_thread.is_alive()
+    assert results["first"].status_code == 200
+    assert call_count["monitor"] == 1
+
+
+def test_job_error_never_reflects_raw_exception_text(isolated_scheduled_jobs, monkeypatch):
+    """Important finding #3: the endpoint used to return
+    f"{type(exc).__name__}: {exc}" straight into the 200 body -- a raw
+    exception message can carry internal filesystem paths, library
+    internals, or URLs. Only the exception's CLASS NAME may appear in the
+    response; the full message must never be reflected."""
+    secret_detail = "unable to open database file /home/operator/data/price_ledger/index.sqlite3 (leaked-detail)"
+
+    def _boom():
+        raise RuntimeError(secret_detail)
+
+    monkeypatch.setattr(
+        appmod, "production_registry",
+        lambda: _fake_registry(_boom, lambda: _fake_watch_report()),
+    )
+
+    resp = client.post("/api/jobs/run-scheduled")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["jobs"]["price_monitor_cycle"]["status"] == "error"
+    assert body["jobs"]["price_monitor_cycle"]["error"] == "RuntimeError"
+    assert secret_detail not in resp.text
+    assert "/home/operator" not in resp.text
+    assert "leaked-detail" not in resp.text
+
+
+def test_all_runs_execute_on_the_same_dedicated_worker_thread(isolated_scheduled_jobs, monkeypatch):
+    """Important finding #2: the endpoint used to offload onto
+    asyncio.to_thread's SHARED default executor pool (also used by
+    /api/jobs and /api/demo-scan), so successive calls could land on
+    different worker threads -- fatal for the default_ledger()/
+    default_sku_map() singletons' non-``check_same_thread=False`` sqlite3
+    connections. Two successive real runs must now execute on the exact
+    same OS thread, and that thread must not be the event-loop/main thread."""
+    monkeypatch.setattr(appmod, "SCHEDULED_JOBS_MIN_INTERVAL_SECONDS", 0)
+    thread_ids: list[int] = []
+
+    def _monitor():
+        thread_ids.append(threading.get_ident())
+        return _fake_monitor_report()
+
+    monkeypatch.setattr(
+        appmod, "production_registry",
+        lambda: _fake_registry(_monitor, lambda: _fake_watch_report()),
+    )
+
+    assert client.post("/api/jobs/run-scheduled").status_code == 200
+    assert client.post("/api/jobs/run-scheduled").status_code == 200
+
+    assert len(thread_ids) == 2
+    assert thread_ids[0] == thread_ids[1]
+    assert thread_ids[0] != threading.get_ident()
+
+
+def test_run_exceeding_the_timeout_returns_a_bounded_error_instead_of_hanging(isolated_scheduled_jobs, monkeypatch):
+    """Important finding #4: no overall timeout bounded the synchronous run,
+    so a large sku_map or a slow/stuck job could hang the caller (and the
+    external cron's HTTP client) indefinitely. The caller must get a clear
+    error well within the configured timeout, even though the underlying
+    thread is still finishing in the background."""
+    monkeypatch.setattr(appmod, "SCHEDULED_JOBS_MIN_INTERVAL_SECONDS", 0)
+    monkeypatch.setattr(appmod, "SCHEDULED_JOBS_TIMEOUT_SECONDS", 0.05)
+
+    def _slow_monitor():
+        time.sleep(0.3)
+        return _fake_monitor_report()
+
+    monkeypatch.setattr(
+        appmod, "production_registry",
+        lambda: _fake_registry(_slow_monitor, lambda: _fake_watch_report()),
+    )
+
+    started_at = time.monotonic()
+    resp = client.post("/api/jobs/run-scheduled")
+    elapsed = time.monotonic() - started_at
+
+    assert resp.status_code == 504
+    assert elapsed < 0.25, "the caller must not wait for the full 0.3s job -- only the 0.05s timeout"
+
+    # Let the background job actually finish and release its lock before the
+    # next test runs (the fixture also hands out a fresh lock, but the
+    # background thread itself is real and outlives this test otherwise).
+    time.sleep(0.35)

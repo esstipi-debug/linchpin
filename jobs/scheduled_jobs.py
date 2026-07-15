@@ -30,6 +30,8 @@ touches APScheduler at all -- is never called from here.
 
 from __future__ import annotations
 
+import threading
+
 from jobs.price_monitor import PRICE_MONITOR_JOB
 from jobs.price_watch import PRICE_WATCH_JOB
 
@@ -41,6 +43,13 @@ from .scheduler import JobRegistry
 PRODUCTION_JOB_IDS: tuple[str, ...] = (PRICE_MONITOR_JOB.id, PRICE_WATCH_JOB.id)
 
 _production_registry: JobRegistry | None = None
+# Fix round 1: guards the lazy-singleton init below against a race under
+# concurrent first-calls (e.g. two threads both observing `None` and each
+# building their own JobRegistry). Benign in practice today -- webapp/app.py's
+# own concurrency lock (_SCHEDULED_JOBS_LOCK) already serializes every real
+# call into this module to one at a time -- but this module has no way to
+# guarantee every future caller does the same, so it defends itself too.
+_production_registry_lock = threading.Lock()
 
 
 def production_registry() -> JobRegistry:
@@ -50,16 +59,20 @@ def production_registry() -> JobRegistry:
     (L1 discovery-assisted watch, ``jobs.price_watch.run_price_watch_cycle``).
 
     Lazily constructed and cached, matching
-    ``jobs.scheduler.default_registry()``'s own singleton convention. Tests
-    should construct their own ``JobRegistry()`` (or monkeypatch this
-    function on whichever module imported it, e.g. ``webapp.app``) instead
-    of touching this singleton, so registrations in one test never leak into
-    another -- same discipline ``default_registry()`` itself documents.
+    ``jobs.scheduler.default_registry()``'s own singleton convention --
+    double-checked locking (``_production_registry_lock``) makes the lazy
+    init itself safe under concurrent first-calls. Tests should construct
+    their own ``JobRegistry()`` (or monkeypatch this function on whichever
+    module imported it, e.g. ``webapp.app``) instead of touching this
+    singleton, so registrations in one test never leak into another -- same
+    discipline ``default_registry()`` itself documents.
     """
     global _production_registry
     if _production_registry is None:
-        registry = JobRegistry()
-        registry.register(PRICE_MONITOR_JOB)
-        registry.register(PRICE_WATCH_JOB)
-        _production_registry = registry
+        with _production_registry_lock:
+            if _production_registry is None:  # re-check: another thread may have won the race
+                registry = JobRegistry()
+                registry.register(PRICE_MONITOR_JOB)
+                registry.register(PRICE_WATCH_JOB)
+                _production_registry = registry
     return _production_registry

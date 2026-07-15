@@ -18,6 +18,8 @@ Guarantees under test:
 """
 from __future__ import annotations
 
+import threading
+
 import jobs.scheduled_jobs as scheduled_jobs_module
 from jobs.price_monitor import PRICE_MONITOR_JOB
 from jobs.price_watch import PRICE_WATCH_JOB
@@ -58,3 +60,35 @@ def test_production_registry_is_a_lazily_constructed_singleton(monkeypatch):
     second = production_registry()
 
     assert first is second
+
+
+def test_production_registry_init_is_safe_under_concurrent_first_calls(monkeypatch):
+    """Important finding #1: the lazy-singleton init had no lock, a benign
+    race under concurrent first-calls. Hammer it from many threads at once
+    (maximizing contention with a Barrier so they all call in as close to
+    lock-step as possible) and assert every thread observes the exact same
+    registry object, populated exactly once (never a duplicate-registration
+    ValueError from two threads each building their own registry)."""
+    monkeypatch.setattr(scheduled_jobs_module, "_production_registry", None)
+
+    thread_count = 16
+    barrier = threading.Barrier(thread_count)
+    results: list[JobRegistry] = [None] * thread_count  # type: ignore[list-item]
+    errors: list[BaseException] = []
+
+    def _call(index: int) -> None:
+        try:
+            barrier.wait(timeout=5)
+            results[index] = production_registry()
+        except BaseException as exc:  # pragma: no cover - only on a genuine regression
+            errors.append(exc)
+
+    threads = [threading.Thread(target=_call, args=(i,)) for i in range(thread_count)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=5)
+
+    assert not errors, f"production_registry() raised under concurrent first-calls: {errors}"
+    assert all(r is results[0] for r in results), "every thread must observe the SAME registry instance"
+    assert {job.id for job in results[0].list()} == set(PRODUCTION_JOB_IDS)
