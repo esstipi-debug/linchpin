@@ -145,6 +145,13 @@ graphify reflect --memory-dir knowledge/graph-memory \
 
 See [`knowledge/graph-memory/README.md`](knowledge/graph-memory/README.md).
 
+## Working with Claude on this project
+
+- **Decision points get alternatives, never open questions.** When a next step
+  genuinely needs the user's decision, present 2-4 concrete options (e.g. via
+  `AskUserQuestion` or a lettered list) instead of an open "what do you want
+  me to do?" prompt.
+
 ## Dev conventions
 
 - **Python 3.11+**. Tests: `pytest tests/ -q` with `PYTHONPATH=.` (the hook persists it).
