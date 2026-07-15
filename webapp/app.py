@@ -36,6 +36,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse  # noqa: 
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 
 from jobs.price_monitor import accept_observation  # noqa: E402
+from jobs.scheduled_jobs import PRODUCTION_JOB_IDS, production_registry  # noqa: E402
 from scm_agent import Orchestrator  # noqa: E402
 from scm_agent.autonomy import DEFAULT_PATH as AUTONOMY_DEFAULT_PATH  # noqa: E402
 from scm_agent.autonomy import (  # noqa: E402
@@ -54,6 +55,7 @@ from scm_agent.autonomy_promotion import (  # noqa: E402
 from scm_agent.event_intent import DEFAULT_ROUTING_PATH as EVENT_ROUTING_DEFAULT_PATH  # noqa: E402
 from scm_agent.events import DEFAULT_PATH as EVENTS_DEFAULT_PATH  # noqa: E402
 from scm_agent.events import Event, EventLedger  # noqa: E402
+from scm_agent.monitors import EVENT_COMPETITOR_PRICE_MOVE, run_all_monitors  # noqa: E402
 from src.constraints import InventoryItem, allocate_under_budget  # noqa: E402
 from src.forecasting import ForecastResult, forecast_demand  # noqa: E402
 from src.mcp_keys import DEFAULT_PATH as MCP_KEYS_DEFAULT_PATH  # noqa: E402
@@ -65,6 +67,8 @@ from src.pricing_intel.ledger import PriceLedger  # noqa: E402
 from src.pricing_intel.match.sku_map import DEFAULT_BASE_PATH as SKU_MAP_DEFAULT_PATH  # noqa: E402
 from src.pricing_intel.match.sku_map import SkuMap  # noqa: E402
 from src.sources import CsvDemandSource  # noqa: E402
+from src.state.store import DEFAULT_BASE_PATH as STATE_STORE_DEFAULT_PATH  # noqa: E402
+from src.state.store import StateStore  # noqa: E402
 from warehouse.generator import generate_layout  # noqa: E402
 from warehouse.html_export import to_html  # noqa: E402
 from warehouse.qa import validate as validate_layout  # noqa: E402
@@ -122,6 +126,12 @@ EVENT_ROUTING_PATH = EVENT_ROUTING_DEFAULT_PATH
 # real continuous-monitoring data, meant to persist).
 PRICE_LEDGER_PATH = PRICE_LEDGER_DEFAULT_PATH
 SKU_MAP_PATH = SKU_MAP_DEFAULT_PATH
+# Same monkeypatch-friendly convention, for POST /api/jobs/run-scheduled's
+# run_all_monitors() call -- the PRODUCTION src.state store (src/state/store.py's
+# own default_store() singleton would work too, but a fresh-per-call instance
+# here matches this file's own EventLedger/PriceLedger/SkuMap convention, and
+# is what makes this path monkeypatchable in tests).
+STATE_STORE_PATH = STATE_STORE_DEFAULT_PATH
 
 
 def _get_orchestrator() -> Orchestrator:
@@ -176,6 +186,18 @@ def _get_sku_map() -> SkuMap:
     """See ``_get_event_ledger()``'s docstring -- same fresh-connection-per-call
     reasoning applies here."""
     return SkuMap(SKU_MAP_PATH)
+
+
+def _get_state_store() -> StateStore:
+    """See ``_get_event_ledger()``'s docstring -- same fresh-connection-per-call
+    reasoning applies here. Used only by POST /api/jobs/run-scheduled's
+    ``run_all_monitors()`` call: the Control Tower's inventory monitors
+    (rop_breach, stockout_projected, ...) read whatever ``src.state`` domains
+    happen to be populated -- an empty store (nothing written yet) makes them
+    silently contribute zero events, same as everywhere else in this
+    codebase (``run_all_monitors``'s own documented "empty Tower on day one
+    is expected" contract)."""
+    return StateStore(STATE_STORE_PATH)
 
 
 def _get_promotion_ledger() -> PromotionLedger:
@@ -923,6 +945,125 @@ async def api_watch(payload: dict = Body(...)) -> dict:
         "matched_product_id": candidate.matched_product_id,
         "events": [e.type for e in outcome.events],
     }
+
+
+# ---- POST /api/jobs/run-scheduled: cron-triggered scheduler wiring ----------
+#
+# jobs.scheduler.JobRegistry.run_once() is Golden Rule 9's ("todo componente
+# continuo degrada a batch") batch-degradation entry point: PRICE_MONITOR_JOB
+# and PRICE_WATCH_JOB were fully built and tested (jobs/price_monitor.py,
+# jobs/price_watch.py) but nothing in production ever called them --
+# jobs.scheduler.default_registry() ships empty, and a real
+# BackgroundScheduler (the "tower" extra) was explicitly rejected for this
+# deploy (fly.toml's WEB_CONCURRENCY=1 on a 512MB VM already OOM-killed once
+# at 2 workers; a persistent background thread doing periodic network
+# scraping inside the same process serving all web/API/MCP traffic is too
+# risky). This endpoint is the other half of Golden Rule 9: an EXTERNAL cron
+# (a GitHub Actions scheduled workflow, added separately) POSTs here, and
+# each call runs both jobs synchronously, once, then returns -- no scheduler
+# loop, no background thread, no sleeping, ever started by this process.
+
+
+def _cycle_report_summary(report: object) -> dict:
+    """Duck-typed summary shared by ``jobs.price_monitor.PriceMonitorCycleReport``
+    and ``jobs.price_watch.PriceWatchCycleReport`` -- both expose the
+    identical ``outcomes``/``pairs_checked``/``summary`` contract (see
+    ``PriceWatchCycleReport``'s own docstring: "Mirrors
+    jobs.price_monitor.PriceMonitorCycleReport's exact shape"), so one small
+    helper serves both instead of two near-identical copies."""
+    by_status: dict[str, int] = {}
+    for outcome in report.outcomes:
+        by_status[outcome.status] = by_status.get(outcome.status, 0) + 1
+    return {"pairs_checked": report.pairs_checked, "by_status": by_status, "summary": report.summary}
+
+
+def _run_scheduled_jobs_sync() -> dict:
+    """The blocking half of POST /api/jobs/run-scheduled -- offloaded via
+    asyncio.to_thread by the async handler below (same reasoning as
+    _run_job_sync: this makes REAL outbound HTTP calls, MercadoLibre's API
+    plus competitor PDP fetches, which must never block the single
+    WEB_CONCURRENCY=1 event loop for the run's duration).
+
+    Runs PRICE_MONITOR_JOB and PRICE_WATCH_JOB via
+    ``production_registry().run_once(job_id)`` -- ONE call per job id (not a
+    single ``run_once()`` covering both), so one job's own failure (a
+    network error, a site compliance refusal raised as an exception) is
+    caught and reported back without ever hiding or aborting the other
+    job's result -- golden rule 14, "ningun cap silencioso", applied to
+    endpoint-level failures too.
+
+    Every price_move/competitor_oos/promo_detected Event either cycle
+    emitted (``report.events`` -- see ``PriceMonitorCycleReport``/
+    ``PriceWatchCycleReport``'s own ``events`` property) is collected and
+    fed into ``scm_agent.monitors.run_all_monitors(price_signal_events=...)``
+    -- previously this parameter was never populated by any production
+    caller, so ``competitor_price_move_monitor`` never actually ran outside
+    a test. ``ledger=_get_event_ledger()`` is the SAME production
+    EventLedger POST /api/watch and GET /api/events already read/write (see
+    that getter's docstring) -- a promoted ``competitor_price_move`` Tower
+    event lands there immediately, never a second, invented event store.
+    """
+    registry = production_registry()
+    jobs_summary: dict[str, dict] = {}
+    price_signal_events: list[Event] = []
+
+    for job_id in PRODUCTION_JOB_IDS:
+        try:
+            report = registry.run_once(job_id)[job_id]
+        except Exception as exc:  # a job's own failure must never hide the other job's result
+            jobs_summary[job_id] = {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
+            continue
+        jobs_summary[job_id] = {"status": "ok", **_cycle_report_summary(report)}
+        price_signal_events.extend(report.events)
+
+    event_ledger = _get_event_ledger()
+    state_store = _get_state_store()
+    try:
+        promoted = run_all_monitors(ledger=event_ledger, store=state_store, price_signal_events=price_signal_events)
+    finally:
+        event_ledger.close()
+        state_store.close()
+
+    competitor_price_move_count = sum(1 for e in promoted if e.type == EVENT_COMPETITOR_PRICE_MOVE)
+    any_job_error = any(v["status"] == "error" for v in jobs_summary.values())
+    return {
+        "status": "error" if any_job_error else "ok",
+        "jobs": jobs_summary,
+        "tower_events_promoted": len(promoted),
+        "competitor_price_move_events_promoted": competitor_price_move_count,
+    }
+
+
+@app.post(
+    "/api/jobs/run-scheduled",
+    dependencies=[Depends(security.rate_limit), Depends(security.require_api_key)],
+)
+async def api_run_scheduled_jobs() -> dict:
+    """The cron-triggered entry point for ``jobs.scheduler.JobRegistry`` (F0,
+    PR-3) -- see ``jobs/scheduled_jobs.py``'s module docstring for the full
+    "why an HTTP endpoint, not a BackgroundScheduler" rationale. An external
+    scheduler (a GitHub Actions cron workflow, added separately) is expected
+    to POST here on a cadence -- see ``jobs.price_monitor.DEFAULT_CADENCE_HOURS``
+    / ``jobs.price_watch.DEFAULT_CADENCE_HOURS`` (4h each) for the intended
+    pace. Nothing in this endpoint or the underlying cycle functions enforces
+    a minimum interval between calls -- calling it far more often than that
+    just repeats real, unnecessary outbound HTTP requests to competitor
+    sites for no benefit (see this endpoint's own test module for the
+    documented operational concern); the cron's OWN schedule is what keeps
+    this safe, not this endpoint.
+
+    Gated the same as every other mutating endpoint in this file
+    (require_api_key + rate_limit, as FastAPI ``dependencies=`` -- both run
+    BEFORE this handler's body, so an unauthenticated caller who
+    guesses/brute-forces this path never triggers any network activity or
+    cost).
+
+    See :func:`_run_scheduled_jobs_sync` for the actual work; this handler
+    only offloads it to a thread (same convention as POST /api/jobs) so a
+    real run's outbound HTTP calls never block the single
+    WEB_CONCURRENCY=1 event loop.
+    """
+    return await asyncio.to_thread(_run_scheduled_jobs_sync)
 
 
 _METRICS_LABEL_RE = re.compile(r"[^\w.\- ]")
