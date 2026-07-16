@@ -23,6 +23,8 @@
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 
 pytest.importorskip("fastapi")
@@ -306,6 +308,32 @@ def test_tower_page_lists_a_pending_t2_item_with_an_approve_button(isolated_ledg
     assert "Reorder plan computed for SKU-A." in r.text
     assert f'data-approval-id="{pending_id}"' in r.text
     assert "Aprobar" in r.text
+
+
+def test_tower_page_shows_the_t2_approval_deadline(isolated_ledgers):
+    """The 'Vence' column surfaces the one-click approval window so the operator
+    sees the deadline before it lapses (a future 'now' keeps it un-lapsed)."""
+    _, autonomy_path, _ = isolated_ledgers
+    future = datetime(2999, 1, 1, tzinfo=timezone.utc)
+    _record_pending(autonomy_path, summary="deadline-marker", now=future, ttl_seconds=600.0)
+
+    r = client.get("/tower")
+
+    assert "<th>Vence</th>" in r.text
+    assert "2999-01-01T00:10:00+00:00" in r.text  # created_at + 600s
+
+
+def test_tower_page_hides_a_lapsed_t2_item(isolated_ledgers):
+    """A pending record whose approval window already closed is dropped from the
+    actionable queue -- no live 'Aprobar' button that could only ever 409."""
+    _, autonomy_path, _ = isolated_ledgers
+    past = datetime(2000, 1, 1, tzinfo=timezone.utc)
+    _record_pending(autonomy_path, summary="LAPSED-MARKER", now=past, ttl_seconds=1.0)
+
+    r = client.get("/tower")
+
+    assert "LAPSED-MARKER" not in r.text
+    assert "No hay aprobaciones pendientes" in r.text
 
 
 def test_tower_page_empty_state_when_no_pending_items(isolated_ledgers):
