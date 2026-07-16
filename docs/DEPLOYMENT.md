@@ -215,18 +215,32 @@ existing `/api/health` check), followed by a post-deploy curl retry loop as
 a second signal. If the release comes up unhealthy, the workflow fails red
 — check `flyctl logs -a linchpin` and consider `flyctl releases rollback`.
 
-**Requires two one-time manual steps — an agent cannot do either:**
+**Requires two one-time manual steps — an agent cannot do either. Do step 2
+before step 1, since step 1's secret lives inside the environment step 2
+creates:**
 
-1. **Add the `FLY_API_TOKEN` repository secret** (Settings > Secrets and
-   variables > Actions). Generate a deploy-scoped token with
+1. **Create the `production` GitHub Environment** (repo Settings >
+   Environments > New environment > name it exactly `production`) with:
+   - **"Required reviewers" checked, add yourself.**
+   - **"Deployment branches and tags" restricted to `main` only.** This
+     matters because the workflow's `workflow_dispatch` trigger has no
+     branch restriction of its own — without this environment-level
+     restriction, someone with write access could manually dispatch the
+     workflow against an arbitrary branch and an approver could unknowingly
+     approve a non-`main` deploy.
+2. **Add `FLY_API_TOKEN` as an Environment secret scoped to `production`**
+   (inside that same environment's settings page: Environment secrets >
+   Add secret — **not** repo-level Settings > Secrets and variables >
+   Actions). Generate a deploy-scoped token with
    `flyctl tokens create deploy -a linchpin`, or from the Fly.io dashboard.
-   Until it's set, the workflow fails fast with a clear `::error::` message
-   rather than silently no-op'ing.
-2. **Create the `production` GitHub Environment with a required reviewer**
-   (repo Settings > Environments > New environment > name it exactly
-   `production` > check "Required reviewers" > add yourself). The `deploy`
-   job targets this environment; without the protection rule configured, it
-   just runs unprotected the moment step 1's secret exists.
+   **This must be an environment secret, not a repository secret** — a
+   repository secret is readable by any workflow in this repo regardless of
+   which (if any) environment it declares, which would let a future
+   workflow (e.g. one the autonomous PR-merge loop adds) read
+   `FLY_API_TOKEN` and deploy without ever triggering step 1's approval
+   gate — silently defeating the entire point of this section. Until the
+   environment secret is set, the workflow fails fast with a clear
+   `::error::` message rather than silently no-op'ing.
 
 **Why the approval gate matters here specifically:** this repo pairs
 automated deployment with an autonomous PR-review-and-merge scheduled task
