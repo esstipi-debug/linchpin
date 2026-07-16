@@ -206,3 +206,23 @@ and regenerated with `/graphify`. If it's absent or stale, `KnowledgeBase.warnin
 surfaces it and the access/app logs flag it — code-side citations degrade to
 theory-only rather than failing silently. Regenerate it as part of your build if
 you rely on theory↔code citations in deliverables.
+
+## 6. Automated deployment (CI/CD)
+
+`.github/workflows/fly-deploy.yml` deploys to production automatically on
+every push to `main` (`flyctl deploy --remote-only`), followed by a
+post-deploy health check against `GET /api/health` (retries 5x, fails the
+workflow run if the new release doesn't come up healthy — check
+`flyctl logs -a linchpin` and consider `flyctl releases rollback` if this
+happens).
+
+**Requires a one-time manual step: a human with repo-admin access must add
+the `FLY_API_TOKEN` repository secret** (Settings > Secrets and variables >
+Actions). Generate a deploy-scoped token with
+`flyctl tokens create deploy -a linchpin`, or from the Fly.io dashboard. An
+agent cannot create this secret. Until it's set, the workflow runs and fails
+fast with a clear `::error::` message rather than silently no-op'ing.
+
+This means merging a PR to `main` now deploys it to the live app — there is
+no staging environment and no manual approval gate between merge and
+production traffic. Treat `main` accordingly.
