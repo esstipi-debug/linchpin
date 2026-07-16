@@ -71,6 +71,18 @@
   need the `pricing-intel`/`dataquality` extras to run — they now degrade with an actionable
   error instead of taking down the whole app; installing those extras in the prod image (to make
   the tools functional live, vs. CLI-only) is a separate deployment decision.
+- **`pricing-intel`/`dataquality` now installed in the production image** (Dockerfile:
+  `pip install -e ".[web,mcp,pricing-intel,dataquality]"`). Without them, the public,
+  unauthenticated `POST /api/demo-price-scan` lead magnet (the cheapest, most GTM-ready
+  offer's free demo) raised an uncaught `PriceParserUnavailable`/`ExtractionDependencyMissing`
+  on any real submission — a 500 for a real visitor, unmonitored since `SENTRY_DSN` isn't set
+  in prod. Reproduced directly (a fresh venv built from the pre-fix Dockerfile line crashes the
+  same way a real visitor would hit; the identical call succeeds once the extras are installed)
+  before and after this change. Safe to add now that the previous entry's lazy-loading fix and
+  the `prod-boot` CI job exist: neither depends on these extras being absent, and the `prod-boot`
+  job already covers the case where they regress to a hard import. No new job-queue/worker
+  infrastructure needed — the added packages are lazy-loaded and small (tens of MB), so nothing
+  is paid until a price-intelligence job actually runs.
 
 ### Changed
 - **Rename: Linchpin -> Kern** (brand only). All user-facing surfaces — README, sales
