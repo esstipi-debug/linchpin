@@ -1301,6 +1301,7 @@ def _autonomy_record_to_dict(record: AutonomyRecord) -> dict:
     d = asdict(record)
     d["created_at"] = record.created_at.isoformat()
     d["acknowledged_at"] = record.acknowledged_at.isoformat() if record.acknowledged_at else None
+    d["expires_at"] = record.expires_at.isoformat() if record.expires_at else None
     return d
 
 
@@ -1464,7 +1465,11 @@ def tower_page() -> HTMLResponse:
     finally:
         autonomy_ledger.close()
     t1 = [r for r in records if r.status == STATUS_AUTO_EXECUTED][-T1_DISPLAY_LIMIT:]
-    t2 = [r for r in records if r.status == STATUS_PENDING]
+    # A lapsed T2 record (approval window closed) is dropped from the actionable
+    # queue even before a sweep flips it to STATUS_EXPIRED -- otherwise the page
+    # would render a live "Aprobar" button that can only 409. is_expired() uses
+    # the current time; a legacy row with no deadline (NULL) is never expired.
+    t2 = [r for r in records if r.status == STATUS_PENDING and not r.is_expired()]
 
     promotion_ledger = _get_promotion_ledger()
     try:

@@ -19,19 +19,25 @@ Guarantees under test:
 
 from __future__ import annotations
 
+import sqlite3
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 from scm_agent import event_intent as event_intent_module
 from scm_agent import llm, tools
 from scm_agent.autonomy import (
+    DEFAULT_TTL_SECONDS,
     STATUS_ACKNOWLEDGED,
     STATUS_AUTO_EXECUTED,
     STATUS_ESCALATED,
+    STATUS_EXPIRED,
     STATUS_PENDING,
     TIER_T1,
     TIER_T2,
     TIER_T3,
     AutonomyLedger,
+    _default_ttl_seconds,
     acknowledge_pending,
     enforce_analysis_tier,
     enforce_writeback_tier,
@@ -494,3 +500,229 @@ def test_handle_event_notify_on_ok_false_suppresses_notification_even_on_ok_stat
     assert routed.result.status == STATUS_OK  # the tool still ran and passed QA
     assert routed.notified is False
     assert called["n"] == 0
+
+
+# -- Approval TTL on T2 pending records (plan S12: "T2 con Approval TTL") -------
+
+_T0 = datetime(2026, 7, 16, 12, 0, 0, tzinfo=timezone.utc)
+
+
+def test_pending_record_is_stamped_with_expires_at_from_ttl():
+    ledger = AutonomyLedger(":memory:")
+    record = ledger.record(
+        tier=TIER_T2, status=STATUS_PENDING, event_type="a", event_id="1", summary="y",
+        now=_T0, ttl_seconds=600.0,
+    )
+    assert record.expires_at == _T0 + timedelta(seconds=600.0)
+
+
+def test_pending_record_uses_default_ttl_when_none_given():
+    ledger = AutonomyLedger(":memory:")
+    record = ledger.record(
+        tier=TIER_T2, status=STATUS_PENDING, event_type="a", event_id="1", summary="y", now=_T0,
+    )
+    assert record.expires_at == _T0 + timedelta(seconds=DEFAULT_TTL_SECONDS)
+
+
+def test_non_pending_records_never_expire():
+    ledger = AutonomyLedger(":memory:")
+    t1 = ledger.record(tier=TIER_T1, status=STATUS_AUTO_EXECUTED, event_type="a", event_id="1",
+                       summary="x", now=_T0, ttl_seconds=600.0)
+    t3 = ledger.record(tier=TIER_T3, status=STATUS_ESCALATED, event_type="b", event_id="2",
+                       summary="z", now=_T0, ttl_seconds=600.0)
+    assert t1.expires_at is None
+    assert t3.expires_at is None
+    assert t1.is_expired(now=_T0 + timedelta(days=365)) is False
+    assert t3.is_expired(now=_T0 + timedelta(days=365)) is False
+
+
+def test_is_expired_tracks_the_deadline():
+    ledger = AutonomyLedger(":memory:")
+    record = ledger.record(tier=TIER_T2, status=STATUS_PENDING, event_type="a", event_id="1",
+                           summary="y", now=_T0, ttl_seconds=600.0)
+    assert record.is_expired(now=_T0 + timedelta(seconds=599)) is False
+    assert record.is_expired(now=_T0 + timedelta(seconds=601)) is True
+
+
+def test_expires_at_survives_get_roundtrip():
+    ledger = AutonomyLedger(":memory:")
+    record = ledger.record(tier=TIER_T2, status=STATUS_PENDING, event_type="a", event_id="1",
+                           summary="y", now=_T0, ttl_seconds=600.0)
+    fetched = ledger.get(record.id)
+    assert fetched is not None
+    assert fetched.expires_at == _T0 + timedelta(seconds=600.0)
+
+
+def test_acknowledge_within_ttl_succeeds():
+    ledger = AutonomyLedger(":memory:")
+    record = ledger.record(tier=TIER_T2, status=STATUS_PENDING, event_type="a", event_id="1",
+                           summary="y", now=_T0, ttl_seconds=600.0)
+    acked = ledger.acknowledge(record.id, "alice", now=_T0 + timedelta(seconds=300))
+    assert acked.status == STATUS_ACKNOWLEDGED
+
+
+def test_acknowledge_refuses_a_lapsed_pending_record():
+    """The crux of the TTL: a stale one-click approval can NOT be rubber-stamped
+    hours later -- the window closed, so it must be re-triggered, never applied."""
+    ledger = AutonomyLedger(":memory:")
+    record = ledger.record(tier=TIER_T2, status=STATUS_PENDING, event_type="a", event_id="1",
+                           summary="y", now=_T0, ttl_seconds=600.0)
+    with pytest.raises(ValueError, match="expired"):
+        ledger.acknowledge(record.id, "alice", now=_T0 + timedelta(seconds=601))
+    # ...and it was NOT flipped to acknowledged as a side effect of the failed call.
+    assert ledger.get(record.id).status == STATUS_PENDING
+
+
+def test_acknowledge_pending_helper_refuses_a_lapsed_record():
+    ledger = AutonomyLedger(":memory:")
+    record = ledger.record(tier=TIER_T2, status=STATUS_PENDING, event_type="a", event_id="1",
+                           summary="y", now=_T0, ttl_seconds=600.0)
+    with pytest.raises(ValueError, match="expired"):
+        acknowledge_pending(ledger, record.id, "alice", now=_T0 + timedelta(seconds=601))
+
+
+def test_expire_stale_transitions_only_lapsed_pending_records():
+    ledger = AutonomyLedger(":memory:")
+    lapsed = ledger.record(tier=TIER_T2, status=STATUS_PENDING, event_type="a", event_id="1",
+                           summary="old", now=_T0, ttl_seconds=600.0)
+    fresh = ledger.record(tier=TIER_T2, status=STATUS_PENDING, event_type="b", event_id="2",
+                          summary="new", now=_T0 + timedelta(seconds=590), ttl_seconds=600.0)
+
+    swept = ledger.expire_stale(now=_T0 + timedelta(seconds=601))
+
+    assert [r.id for r in swept] == [lapsed.id]
+    assert ledger.get(lapsed.id).status == STATUS_EXPIRED
+    assert ledger.get(fresh.id).status == STATUS_PENDING
+    # An expired row drops off the actionable one-click queue.
+    assert [r.id for r in ledger.list_pending()] == [fresh.id]
+
+
+def test_expire_stale_is_idempotent_on_a_second_pass():
+    ledger = AutonomyLedger(":memory:")
+    ledger.record(tier=TIER_T2, status=STATUS_PENDING, event_type="a", event_id="1",
+                  summary="old", now=_T0, ttl_seconds=600.0)
+    first = ledger.expire_stale(now=_T0 + timedelta(seconds=601))
+    second = ledger.expire_stale(now=_T0 + timedelta(seconds=602))
+    assert len(first) == 1
+    assert second == []  # already expired, not swept again
+
+
+def test_list_pending_with_now_hides_lapsed_rows_before_a_sweep():
+    ledger = AutonomyLedger(":memory:")
+    lapsed = ledger.record(tier=TIER_T2, status=STATUS_PENDING, event_type="a", event_id="1",
+                           summary="old", now=_T0, ttl_seconds=600.0)
+    fresh = ledger.record(tier=TIER_T2, status=STATUS_PENDING, event_type="b", event_id="2",
+                          summary="new", now=_T0 + timedelta(seconds=590), ttl_seconds=600.0)
+    now = _T0 + timedelta(seconds=601)
+    # No sweep has run, so both are still STATUS_PENDING on disk...
+    assert {r.id for r in ledger.list_pending()} == {lapsed.id, fresh.id}
+    # ...but the time-aware view already excludes the lapsed one.
+    assert [r.id for r in ledger.list_pending(now=now)] == [fresh.id]
+
+
+def test_legacy_db_without_expires_at_column_is_migrated_and_rows_never_expire(tmp_path):
+    """A ledger file created before this change has no expires_at column. The
+    ledger must ALTER it in on open, and pre-existing pending rows (NULL
+    expires_at) must remain acknowledgeable forever -- never silently lapse."""
+    db_path = tmp_path / "legacy_autonomy.sqlite3"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        "CREATE TABLE autonomy_actions ("
+        " id TEXT PRIMARY KEY, tier TEXT NOT NULL, status TEXT NOT NULL,"
+        " event_type TEXT NOT NULL, event_id TEXT NOT NULL, sku TEXT, tool TEXT,"
+        " summary TEXT NOT NULL, created_at TEXT NOT NULL,"
+        " acknowledged_by TEXT, acknowledged_at TEXT)"
+    )
+    conn.execute(
+        "INSERT INTO autonomy_actions (id, tier, status, event_type, event_id, summary, created_at)"
+        " VALUES ('legacy-1', ?, ?, 'a', '1', 'pre-existing', ?)",
+        (TIER_T2, STATUS_PENDING, _T0.isoformat()),
+    )
+    conn.commit()
+    conn.close()
+
+    ledger = AutonomyLedger(db_path)
+    record = ledger.get("legacy-1")
+    assert record is not None
+    assert record.expires_at is None
+    assert record.is_expired(now=_T0 + timedelta(days=3650)) is False
+    # A legacy pending row with no deadline is still acknowledgeable and is not
+    # swept away by expire_stale().
+    assert ledger.expire_stale(now=_T0 + timedelta(days=3650)) == []
+    acked = ledger.acknowledge("legacy-1", "alice", now=_T0 + timedelta(days=3650))
+    assert acked.status == STATUS_ACKNOWLEDGED
+    ledger.close()
+
+
+def test_enforce_analysis_tier_t2_pending_record_carries_a_deadline():
+    routed = _routed(TIER_T2)
+    ledger = AutonomyLedger(":memory:")
+
+    outcome = enforce_analysis_tier(routed, _event(), ledger=ledger)
+
+    pending = ledger.list_pending()
+    assert len(pending) == 1
+    assert pending[0].expires_at is not None
+    assert pending[0].expires_at > pending[0].created_at
+    # The human-facing HANDOFF surfaces the deadline so the operator sees it.
+    assert outcome.handoffs[0].data["expires_at"] == pending[0].expires_at.isoformat()
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("600", 600.0),
+        ("600.5", 600.5),
+        ("", 900.0),          # unset -> default
+        ("0", 900.0),         # non-positive -> default
+        ("-5", 900.0),        # negative -> default
+        ("banana", 900.0),    # unparseable -> default
+        ("inf", 900.0),       # non-finite -> default (timedelta(seconds=inf) would OverflowError)
+        ("nan", 900.0),       # non-finite -> default
+    ],
+)
+def test_default_ttl_seconds_env_parsing(monkeypatch, raw, expected):
+    monkeypatch.setenv("LINCHPIN_AUTONOMY_TTL_SECONDS", raw)
+    assert _default_ttl_seconds() == expected
+
+
+def test_default_ttl_seconds_unset_env_is_900(monkeypatch):
+    monkeypatch.delenv("LINCHPIN_AUTONOMY_TTL_SECONDS", raising=False)
+    assert _default_ttl_seconds() == 900.0
+
+
+def test_migration_is_idempotent_across_reopens(tmp_path):
+    """Opening the same ledger file twice (the webapp builds a fresh ledger per
+    request) never re-raises on the already-migrated column."""
+    db_path = tmp_path / "reopen.sqlite3"
+    first = AutonomyLedger(db_path)
+    first.record(tier=TIER_T2, status=STATUS_PENDING, event_type="a", event_id="1",
+                 summary="y", now=_T0, ttl_seconds=600.0)
+    first.close()
+    # Re-open: _migrate_add_expires_at sees the column already present, no-ops.
+    second = AutonomyLedger(db_path)
+    reloaded = second.get(second.list_all()[0].id)
+    assert reloaded.expires_at == _T0 + timedelta(seconds=600.0)
+    second.close()
+
+
+def test_migration_tolerates_a_pre_added_expires_at_column(tmp_path):
+    """The concurrency self-heal: if the column already exists on a legacy-shaped
+    table (a racing ledger added it first), the ALTER's 'duplicate column name'
+    is swallowed rather than 500ing the request."""
+    db_path = tmp_path / "raced.sqlite3"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        "CREATE TABLE autonomy_actions ("
+        " id TEXT PRIMARY KEY, tier TEXT NOT NULL, status TEXT NOT NULL,"
+        " event_type TEXT NOT NULL, event_id TEXT NOT NULL, sku TEXT, tool TEXT,"
+        " summary TEXT NOT NULL, created_at TEXT NOT NULL,"
+        " acknowledged_by TEXT, acknowledged_at TEXT, expires_at TEXT)"
+    )
+    conn.commit()
+    conn.close()
+    # Opening it must not raise even though expires_at already exists.
+    ledger = AutonomyLedger(db_path)
+    ledger._migrate_add_expires_at()  # explicit second call: still a clean no-op
+    assert ledger.list_all() == []
+    ledger.close()

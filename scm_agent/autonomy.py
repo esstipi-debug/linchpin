@@ -55,11 +55,12 @@ skipping a QA function where the module has no ``JobReport`` to gate.
 
 from __future__ import annotations
 
+import math
 import os
 import sqlite3
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from src import escalation, writeback
@@ -89,10 +90,38 @@ STATUS_AUTO_EXECUTED = "auto_executed"   # T1: ran autonomously, audited
 STATUS_PENDING = "pending"               # T2: awaiting one-click acknowledgment
 STATUS_ACKNOWLEDGED = "acknowledged"     # T2: a human completed the acknowledgment
 STATUS_ESCALATED = "escalated"           # T3: routed to a human, never auto-actioned
+STATUS_EXPIRED = "expired"               # T2: the approval window lapsed, unacted on
 
 # Env-override convention matching scm_agent/events.py's DEFAULT_PATH and
 # src/state/store.py's LINCHPIN_STATE_PATH.
 DEFAULT_PATH = os.environ.get("LINCHPIN_AUTONOMY_PATH", "").strip() or "data/autonomy.sqlite3"
+
+
+def _default_ttl_seconds() -> float:
+    """The T2 one-click-approval window, in seconds. Defaults to 900s -- the
+    same TTL ``src/writeback.py``'s ``Approval`` uses, which this module's own
+    docstring says the autonomy layer *extends* (plan S12: "T2 con Approval
+    TTL"). Overridable via ``LINCHPIN_AUTONOMY_TTL_SECONDS`` (env convention
+    matching ``LINCHPIN_AUTONOMY_PATH`` above); a non-positive or unparseable
+    value falls back to the 900s default rather than disabling expiry.
+    """
+    raw = os.environ.get("LINCHPIN_AUTONOMY_TTL_SECONDS", "").strip()
+    if not raw:
+        return 900.0
+    try:
+        value = float(raw)
+    except ValueError:
+        return 900.0
+    # Reject non-positive AND non-finite ("inf"/"nan") values: float("inf")
+    # parses and is > 0, but timedelta(seconds=inf) later raises OverflowError.
+    if not math.isfinite(value) or value <= 0:
+        return 900.0
+    return value
+
+
+# Resolved once at import (mirrors DEFAULT_PATH). Kept a module global so a
+# test can monkeypatch it, and so record() reads it lazily at call time.
+DEFAULT_TTL_SECONDS = _default_ttl_seconds()
 
 
 def _ensure_utc(dt: datetime) -> datetime:
@@ -121,16 +150,31 @@ class AutonomyRecord:
     tool: str | None = None
     acknowledged_by: str | None = None
     acknowledged_at: datetime | None = None
+    # Only T2 pending records carry a deadline. T1/T3 (and legacy rows written
+    # before the TTL existed) leave this None and never expire -- see
+    # is_expired().
+    expires_at: datetime | None = None
+
+    def is_expired(self, now: datetime | None = None) -> bool:
+        """True once the T2 approval window has lapsed. A record with no
+        deadline (``expires_at is None`` -- every T1/T3 row, and every legacy
+        pending row predating this field) is never expired, so old data can
+        always still be acknowledged rather than silently lapsing."""
+        if self.expires_at is None:
+            return False
+        moment = _ensure_utc(now) if now is not None else datetime.now(timezone.utc)
+        return moment >= self.expires_at
 
 
 def _row_to_record(row: tuple) -> AutonomyRecord:
     (id_, tier, status, event_type, event_id, sku, tool, summary, created_at,
-     acknowledged_by, acknowledged_at) = row
+     acknowledged_by, acknowledged_at, expires_at) = row
     return AutonomyRecord(
         id=id_, tier=tier, status=status, event_type=event_type, event_id=event_id,
         summary=summary, created_at=datetime.fromisoformat(created_at), sku=sku, tool=tool,
         acknowledged_by=acknowledged_by,
         acknowledged_at=datetime.fromisoformat(acknowledged_at) if acknowledged_at else None,
+        expires_at=datetime.fromisoformat(expires_at) if expires_at else None,
     )
 
 
@@ -162,12 +206,35 @@ class AutonomyLedger:
             " summary TEXT NOT NULL,"
             " created_at TEXT NOT NULL,"
             " acknowledged_by TEXT,"
-            " acknowledged_at TEXT"
+            " acknowledged_at TEXT,"
+            " expires_at TEXT"
             ")"
         )
+        self._migrate_add_expires_at()
         self._conn.execute("CREATE INDEX IF NOT EXISTS idx_autonomy_status ON autonomy_actions(status)")
         self._conn.execute("CREATE INDEX IF NOT EXISTS idx_autonomy_event_id ON autonomy_actions(event_id)")
         self._conn.commit()
+
+    def _migrate_add_expires_at(self) -> None:
+        """Add the ``expires_at`` column to a ledger file created before this
+        change (CREATE TABLE IF NOT EXISTS never adds a column to an existing
+        table). Legacy rows keep NULL -> they never expire (see
+        AutonomyRecord.is_expired), so no live pending approval is silently
+        invalidated by the upgrade. Idempotent, and safe under concurrency: the
+        webapp builds a fresh AutonomyLedger (and so runs this) on every
+        request, so on the first deploy against a real legacy DB two requests
+        can race between the PRAGMA check and the ALTER. SQLite has no
+        ``ADD COLUMN IF NOT EXISTS``, so the losing racer's ALTER raises
+        "duplicate column name" -- caught here as the benign already-migrated
+        case rather than 500ing that request."""
+        columns = {row[1] for row in self._conn.execute("PRAGMA table_info(autonomy_actions)")}
+        if "expires_at" in columns:
+            return
+        try:
+            self._conn.execute("ALTER TABLE autonomy_actions ADD COLUMN expires_at TEXT")
+        except sqlite3.OperationalError as exc:
+            if "duplicate column name" not in str(exc).lower():
+                raise
 
     def record(
         self,
@@ -180,58 +247,116 @@ class AutonomyLedger:
         sku: str | None = None,
         tool: str | None = None,
         now: datetime | None = None,
+        ttl_seconds: float | None = None,
     ) -> AutonomyRecord:
         """Write one audit row and return it. Every T1/T2/T3 decision writes
         exactly one of these -- this is what makes "audited, not silent" true
-        rather than aspirational."""
+        rather than aspirational.
+
+        A ``STATUS_PENDING`` (T2) row is stamped with an ``expires_at`` deadline
+        ``ttl_seconds`` (default :data:`DEFAULT_TTL_SECONDS`) after ``now`` --
+        the one-click approval window (plan S12: "T2 con Approval TTL"). Every
+        other status leaves ``expires_at`` NULL: a T1 auto-execution and a T3
+        escalation are already terminal, not something a human is expected to
+        act on before a clock runs out.
+        """
         created_at = _ensure_utc(now) if now is not None else datetime.now(timezone.utc)
+        expires_at: datetime | None = None
+        if status == STATUS_PENDING:
+            ttl = ttl_seconds if ttl_seconds is not None else DEFAULT_TTL_SECONDS
+            expires_at = created_at + timedelta(seconds=ttl)
         record_id = uuid.uuid4().hex
         self._conn.execute(
             "INSERT INTO autonomy_actions"
-            " (id, tier, status, event_type, event_id, sku, tool, summary, created_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (record_id, tier, status, event_type, event_id, sku, tool, summary, created_at.isoformat()),
+            " (id, tier, status, event_type, event_id, sku, tool, summary, created_at, expires_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (record_id, tier, status, event_type, event_id, sku, tool, summary,
+             created_at.isoformat(), expires_at.isoformat() if expires_at else None),
         )
         self._conn.commit()
         return AutonomyRecord(
             id=record_id, tier=tier, status=status, event_type=event_type, event_id=event_id,
-            summary=summary, created_at=created_at, sku=sku, tool=tool,
+            summary=summary, created_at=created_at, sku=sku, tool=tool, expires_at=expires_at,
         )
+
+    _SELECT_COLUMNS = (
+        "id, tier, status, event_type, event_id, sku, tool, summary, created_at,"
+        " acknowledged_by, acknowledged_at, expires_at"
+    )
 
     def get(self, record_id: str) -> AutonomyRecord | None:
         row = self._conn.execute(
-            "SELECT id, tier, status, event_type, event_id, sku, tool, summary, created_at,"
-            " acknowledged_by, acknowledged_at FROM autonomy_actions WHERE id = ?",
+            f"SELECT {self._SELECT_COLUMNS} FROM autonomy_actions WHERE id = ?",
             (record_id,),
         ).fetchone()
         return _row_to_record(row) if row else None
 
-    def list_pending(self) -> list[AutonomyRecord]:
+    def list_pending(self, now: datetime | None = None) -> list[AutonomyRecord]:
         """Every T2 record still awaiting acknowledgment, oldest first --
-        what PR-7's Tower tab lists as the "approve with one click" queue."""
+        what PR-7's Tower tab lists as the "approve with one click" queue.
+
+        When ``now`` is given, records whose approval window has already lapsed
+        (``is_expired(now)``) are excluded even if a sweep
+        (:meth:`expire_stale`) has not yet flipped them to
+        ``STATUS_EXPIRED`` -- so the actionable queue never offers a stale item
+        a human can no longer complete. With ``now=None`` (the default), every
+        ``STATUS_PENDING`` row is returned unchanged, preserving the original
+        behavior for callers that do not care about the clock.
+        """
         rows = self._conn.execute(
-            "SELECT id, tier, status, event_type, event_id, sku, tool, summary, created_at,"
-            " acknowledged_by, acknowledged_at FROM autonomy_actions WHERE status = ? ORDER BY rowid ASC",
+            f"SELECT {self._SELECT_COLUMNS} FROM autonomy_actions WHERE status = ? ORDER BY rowid ASC",
             (STATUS_PENDING,),
         ).fetchall()
-        return [_row_to_record(r) for r in rows]
+        records = [_row_to_record(r) for r in rows]
+        if now is None:
+            return records
+        return [r for r in records if not r.is_expired(now)]
 
     def list_all(self) -> list[AutonomyRecord]:
         """Every recorded decision, oldest first -- the full A3 audit trail."""
         rows = self._conn.execute(
-            "SELECT id, tier, status, event_type, event_id, sku, tool, summary, created_at,"
-            " acknowledged_by, acknowledged_at FROM autonomy_actions ORDER BY rowid ASC"
+            f"SELECT {self._SELECT_COLUMNS} FROM autonomy_actions ORDER BY rowid ASC"
         ).fetchall()
         return [_row_to_record(r) for r in rows]
+
+    def expire_stale(self, now: datetime | None = None) -> list[AutonomyRecord]:
+        """Flip every lapsed ``STATUS_PENDING`` row (deadline at or before
+        ``now``) to ``STATUS_EXPIRED`` and return the transitioned records,
+        oldest first. A pending row with no deadline (legacy NULL
+        ``expires_at``) is never swept. Idempotent: an already-expired row is
+        not touched a second time, so re-running the sweep returns an empty
+        list once the backlog is drained.
+
+        The safe direction on timeout, by construction: expiry makes a T2 item
+        *lapse* (it must be re-triggered), never auto-approves it -- consistent
+        with src/guided.py's "three of four outcomes need a human" contract.
+        """
+        moment = _ensure_utc(now) if now is not None else datetime.now(timezone.utc)
+        lapsed = [r for r in self.list_pending() if r.is_expired(moment)]
+        if not lapsed:
+            return []
+        self._conn.executemany(
+            "UPDATE autonomy_actions SET status = ? WHERE id = ?",
+            [(STATUS_EXPIRED, r.id) for r in lapsed],
+        )
+        self._conn.commit()
+        return [self.get(r.id) for r in lapsed]
 
     def acknowledge(self, record_id: str, approved_by: str, *, now: datetime | None = None) -> AutonomyRecord:
         """Flip a ``STATUS_PENDING`` record to ``STATUS_ACKNOWLEDGED``.
 
         Raises ``KeyError`` if ``record_id`` is unknown, or ``ValueError`` if
         it is not currently pending (already acknowledged, or was never a T2
-        row) -- an acknowledgment must be a loud, actionable failure when it
-        cannot legitimately apply, never a silent no-op.
+        row) OR if its approval window has already lapsed -- an acknowledgment
+        must be a loud, actionable failure when it cannot legitimately apply,
+        never a silent no-op.
+
+        The expiry check is the enforcement half of the T2 Approval TTL: a
+        stale one-click approval can never be rubber-stamped after its window
+        closed. Run :meth:`expire_stale` first if you want lapsed rows visibly
+        moved to ``STATUS_EXPIRED``; either way, acknowledging one is refused.
         """
+        acknowledged_at = _ensure_utc(now) if now is not None else datetime.now(timezone.utc)
         existing = self.get(record_id)
         if existing is None:
             raise KeyError(f"no autonomy record with id {record_id!r}")
@@ -240,7 +365,12 @@ class AutonomyLedger:
                 f"autonomy record {record_id!r} is not pending (status={existing.status!r}) -- "
                 "only a T2 record still awaiting acknowledgment can be acknowledged"
             )
-        acknowledged_at = _ensure_utc(now) if now is not None else datetime.now(timezone.utc)
+        if existing.is_expired(acknowledged_at):
+            raise ValueError(
+                f"autonomy record {record_id!r} expired at {existing.expires_at.isoformat()} -- "
+                "the one-click approval window has closed; re-trigger the action instead of "
+                "acknowledging a stale request"
+            )
         self._conn.execute(
             "UPDATE autonomy_actions SET status = ?, acknowledged_by = ?, acknowledged_at = ? WHERE id = ?",
             (STATUS_ACKNOWLEDGED, approved_by, acknowledged_at.isoformat(), record_id),
@@ -319,15 +449,22 @@ def enforce_analysis_tier(
             sku=event.sku, tool=route.tool, summary=context,
         )
         deliverable_list = ", ".join(result.deliverables.values()) or "(no files -- see result.summary)"
+        expires_iso = record.expires_at.isoformat() if record.expires_at else None
         packet = HandoffPacket(
             title=f"Acknowledge: {route.tool} result for {event.sku or event.type}",
             steps=[
                 f"Review the deliverable(s): {deliverable_list}",
                 f"Call scm_agent.autonomy.acknowledge_pending(ledger, {record.id!r}, approved_by) "
                 "to complete it (PR-7 wires this to POST /api/approvals/{id}).",
+                f"Do so before the approval window closes at {expires_iso} -- after that it lapses "
+                "and must be re-triggered.",
             ],
-            data={"pending_id": record.id, "event_type": event.type, "sku": event.sku, "tool": route.tool},
-            risk_if_skipped=f"{context} stays unacted on until a human acknowledges it",
+            data={
+                "pending_id": record.id, "event_type": event.type, "sku": event.sku,
+                "tool": route.tool, "expires_at": expires_iso,
+            },
+            risk_if_skipped=f"{context} stays unacted on until a human acknowledges it "
+            f"(the one-click window closes at {expires_iso})",
         )
         return as_handoff(f"T2: {context} -- awaiting one-click acknowledgment.", [packet])
 

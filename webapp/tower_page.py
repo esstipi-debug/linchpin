@@ -171,6 +171,9 @@ def _t2_rows(records: list[AutonomyRecord]) -> str:
     for r in records:
         sku = escape(r.sku) if r.sku else "&mdash;"
         tool = escape(r.tool) if r.tool else "&mdash;"
+        # Show the one-click approval deadline so the operator knows the window
+        # closes -- a legacy row predating the TTL (NULL) shows a dash.
+        expires = escape(r.expires_at.isoformat()) if r.expires_at else "&mdash;"
         rows.append(
             "<tr>"
             f"<td>{escape(r.event_type)}</td>"
@@ -178,6 +181,7 @@ def _t2_rows(records: list[AutonomyRecord]) -> str:
             f"<td>{tool}</td>"
             f'<td>{escape(r.summary)}</td>'
             f"<td>{escape(r.created_at.isoformat())}</td>"
+            f"<td>{expires}</td>"
             "<td>"
             f'<button class="btn btn-primary approve-btn" data-approval-id="{escape(r.id)}" '
             'onclick="towerApprove(this)">Aprobar</button>'
@@ -187,7 +191,7 @@ def _t2_rows(records: list[AutonomyRecord]) -> str:
         )
     return (
         '<table><thead><tr><th>Evento</th><th>SKU</th><th>Tool</th><th>Resumen</th>'
-        "<th>Pendiente desde</th><th>Accion</th></tr></thead><tbody>"
+        "<th>Pendiente desde</th><th>Vence</th><th>Accion</th></tr></thead><tbody>"
         + "".join(rows)
         + "</tbody></table>"
     )
