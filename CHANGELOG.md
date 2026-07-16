@@ -35,6 +35,25 @@
   caught by hand). To activate live: `flyctl secrets set SENTRY_DSN=... -a linchpin`.
 
 ### Fixed
+- **S&OP integrated-plan deliverables shipped with ZERO or off-topic L3 citations**
+  (3.0-audit finding #7). `jobs/integrated_plan.py::gated_citations` had two defects, both
+  reproduced against the committed graph: (1) **recall** -- it grounded only the top-3
+  candidate citations before the strict 2-hop gate, and the S&OP concept cluster is fragmented
+  across disconnected graph components (the code-bridged `vollmann_sop` anchor is islanded from
+  the `aggregate_planning` / `sales_and_operations_planning` cluster), so the top-3 could all
+  land in different islands and every one be dropped -- ZERO citations on 6 of 8 plainly-S&OP
+  briefs; (2) **precision** -- it fed the free-text client brief into grounding (where it
+  outweighs the keyword set), so incidental tokens passed the permissive 2-hop gate
+  (`aggregate_planning` reaches ~19% of the graph within 2 hops via the shared book-hub node):
+  a brief saying "budget cap" surfaced an emissions "cap-and-trade" citation, and EOQ-flavored
+  wording surfaced inventory citations over the real S&OP nodes. Fixed by grounding on the
+  fixed S&OP keyword set only (not the brief -- these citations ground the S&OP *method*, so
+  they are now deterministic and on-topic regardless of client wording) over a modestly wider
+  candidate pool (`_CANDIDATE_POOL=6`), shown as a tight capped set (`_MAX_CITATIONS=3`). The
+  gate itself (anchors, `MAX_HOPS`, `MIN_CITATIONS`) is **unchanged**. 12 tests (realistic-brief
+  recall regressions + lexical-noise precision guards + brief-independence + cap). The identical
+  `limit=3` shallow-pool pattern latently affects `jobs/price_intelligence.py` and
+  `scm_agent/packages.py::_run_step` -- flagged as a follow-up, not fixed here.
 - **Production boot crash: `ModuleNotFoundError` for the optional pricing extras.** The
   price-watch tools put `src.pricing_intel` on the app's import chain (`webapp.app` ->
   `scm_agent` -> `tools` -> `pricing_intel`), but several of its modules hard-imported

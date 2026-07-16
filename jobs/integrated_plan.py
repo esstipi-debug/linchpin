@@ -114,6 +114,32 @@ _CITATION_KEYWORDS = (
     "integrated business planning", "aggregate planning", "demand plan",
 )
 
+# These L3 citations ground the S&OP *method* (which books back integrated
+# demand-supply planning), not the client's specific numbers -- so they are
+# grounded on the fixed S&OP keyword set above, NOT on the free-text brief, and
+# are the same canonical sources for every integrated-plan deliverable. Two
+# defects (3.0-audit finding #7) drove this design, both reproduced against the
+# committed graph:
+#   1. RECALL. The S&OP concept cluster is fragmented across several disconnected
+#      components (the code-bridged `vollmann_sop` anchor is islanded from the
+#      `aggregate_planning`/`sales_and_operations_planning` cluster). Grounding a
+#      pool of only the top-3 candidates could land all three in different islands
+#      and every one be dropped by the (deliberately strict) 2-hop citation gate,
+#      silently degrading realistic briefs to ZERO citations (6/8 in a battery).
+#      Fixed by grounding a WIDER pool so on-topic candidates ranked below #3 still
+#      reach the gate, then showing a tight, capped set.
+#   2. PRECISION. Feeding the free-text brief into grounding (where it carries more
+#      weight than the keyword set) let incidental brief tokens pass the 2-hop gate
+#      -- which is itself permissive for this anchor (`aggregate_planning` reaches
+#      ~19% of the graph within 2 hops via the shared book-hub node). A brief
+#      saying "budget cap" surfaced an emissions "cap-and-trade" citation; an
+#      EOQ-flavored brief surfaced EOQ/reorder-point over the real S&OP nodes.
+#      Fixed by grounding on the keyword set only, so the citations are
+#      deterministic and on-topic regardless of the client's wording.
+# The gate itself (anchors, MAX_HOPS, MIN_CITATIONS) is untouched.
+_CANDIDATE_POOL = 6   # candidates grounded and offered to the strict gate
+_MAX_CITATIONS = 3    # kept, on-topic survivors ultimately shown (tight display)
+
 
 @dataclass(frozen=True)
 class IntegratedPlanBundle:
@@ -449,14 +475,30 @@ def build_deck(
     )
 
 
-def gated_citations(brief: str = "", *, kb: KnowledgeBase | None = None, limit: int = 3) -> tuple[str, ...]:
+def gated_citations(
+    brief: str = "",
+    *,
+    kb: KnowledgeBase | None = None,
+    limit: int = _CANDIDATE_POOL,
+    max_shown: int = _MAX_CITATIONS,
+) -> tuple[str, ...]:
     """The E5-gated L3 citations for this playbook (golden rule 7 + the
     citation gate) -- reuses the "sop" ``TOOL_CONCEPTS`` anchors verbatim
     (no parallel citation mechanism, same pattern
-    ``jobs/repricing.py``/``jobs/price_intelligence.py`` already established)."""
+    ``jobs/repricing.py``/``jobs/price_intelligence.py`` already established).
+
+    These citations ground the S&OP *method*, so grounding runs on the fixed
+    ``_CITATION_KEYWORDS`` set only -- ``brief`` is deliberately NOT fed into the
+    query (see the module comment on ``_CANDIDATE_POOL``): the client's free-text
+    wording carries more grounding weight than the keyword set and let incidental
+    tokens surface off-topic citations past the permissive 2-hop gate. ``limit``
+    grounds a wider candidate pool than we display so the strict gate can reach
+    past the S&OP cluster's graph fragmentation; ``filter_citations`` preserves
+    grounding rank, so ``[:max_shown]`` keeps the top on-topic survivors as a
+    tight set. ``brief`` is retained in the signature for call-site stability."""
     kb = kb or KnowledgeBase()
-    candidates = kb.ground_citations_detailed(_CITATION_KEYWORDS, brief, limit=limit)
-    return filter_citations(kb, TOOL_KEY, candidates).kept
+    candidates = kb.ground_citations_detailed(_CITATION_KEYWORDS, "", limit=limit)
+    return filter_citations(kb, TOOL_KEY, candidates).kept[:max_shown]
 
 
 def write_deliverable(

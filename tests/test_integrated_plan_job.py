@@ -14,6 +14,8 @@ import pytest
 
 from jobs import integrated_plan as ip
 from jobs.qa import integrated_plan_passed, verify_integrated_plan
+from scm_agent.citation_gate import MIN_CITATIONS
+from scm_agent.knowledge import KnowledgeBase
 from src.deliverable import Deliverable
 from src.sop_engine.coherence import CHECK_BUDGET_FEASIBILITY, CHECK_PROMO_COVERAGE, CHECK_SERVICE_LEVEL
 from src.sop_engine.demand_plan import LIQUIDATION_SOURCE, NO_SHIFT_SOURCE, PRICE_OPTIMIZER_SOURCE
@@ -225,3 +227,93 @@ def test_forecast_only_skus_are_dropped_with_a_named_reason(tmp_path):
     assert bundle.dropped_no_purchase_data == ("ORPHAN",)
     assert "ORPHAN" in bundle.summary
     assert bundle.plan.n_skus == 1
+
+
+# ---- L3 citation grounding: S&OP method citations must be present, on-topic ----
+# ---- and immune to client-brief lexical noise (3.0-audit finding #7) ----
+
+# Real, plainly-S&OP briefs an operator would actually type. Every one of these
+# degraded to ZERO L3 citations before the fix (6/8 in the reproduction battery):
+# the S&OP concept cluster is fragmented across disconnected graph components, so
+# the top-3 grounded candidates could all land in different islands and every one
+# be dropped by the (unchanged, strict) 2-hop citation gate.
+_REALISTIC_SOP_BRIEFS = (
+    "Build an integrated business plan balancing our demand forecast against supply and purchasing.",
+    "Reconcile our sales forecast with production and procurement capacity for the quarter.",
+    "Run an integrated demand-supply plan: what to buy, make, and when, given our inventory.",
+    "We want a monthly S&OP cycle aligning marketing demand plan with operations supply plan.",
+    "Aggregate our SKU demand into a family-level supply and purchasing plan.",
+    "Integrated business planning across demand, supply, inventory and purchasing for Q3.",
+)
+
+# Briefs whose incidental tokens used to drag off-topic citations past the
+# permissive 2-hop gate when the free-text brief was fed into grounding: "budget
+# cap" -> an emissions "cap-and-trade" citation; EOQ/reorder-point wording ->
+# inventory citations displacing the real S&OP nodes. Grounding on the fixed
+# keyword set (not the brief) must keep these deterministic and on-topic.
+_NOISY_SOP_BRIEFS = (
+    "S&OP: reconcile forecast demand against on-hand inventory, incoming POs and the budget cap.",
+    "Coordinate the demand plan with economic order quantity, safety stock and reorder point.",
+    "Reconcile demand and supply while accounting for cycle inventory and economic order quantity.",
+)
+
+# Strong, unambiguous S&OP terms only. Deliberately excludes bare "demand"/
+# "supply", which match SCM book *filenames* (e.g. "…-supply-chain-management.pdf")
+# and would let an off-topic citation from any supply-chain-titled book pass.
+_STRONG_SOP_TERMS = ("s&op", "operations planning", "aggregate planning")
+
+# Off-topic concepts that must never appear in an S&OP deck's citations (the
+# exact precision regressions caught in adversarial review).
+_OFF_TOPIC_TERMS = ("cap-and-trade", "emission", "economic order quantity", "reorder point")
+
+
+@pytest.fixture(scope="module")
+def _kb() -> KnowledgeBase:
+    return KnowledgeBase()
+
+
+@pytest.mark.parametrize("brief", _REALISTIC_SOP_BRIEFS)
+def test_realistic_sop_brief_keeps_its_l3_citations(_kb, brief):
+    """The recall regression: a plainly-S&OP brief must ground at least
+    MIN_CITATIONS citations, never silently degrade to zero because the gate's
+    candidate pool was too shallow to reach past the graph's S&OP islands."""
+    cites = ip.gated_citations(brief, kb=_kb)
+    assert len(cites) >= MIN_CITATIONS, f"{brief!r} degraded to {len(cites)} citation(s)"
+
+
+def test_gated_citations_stay_on_topic_sop(_kb):
+    """Precision: every kept citation is a genuinely S&OP / aggregate-planning
+    source, matched on strong terms (not filename substrings)."""
+    for brief in _REALISTIC_SOP_BRIEFS:
+        for cite in ip.gated_citations(brief, kb=_kb):
+            low = cite.lower()
+            assert any(term in low for term in _STRONG_SOP_TERMS), f"off-topic citation kept: {cite!r}"
+
+
+@pytest.mark.parametrize("brief", _NOISY_SOP_BRIEFS)
+def test_brief_lexical_noise_never_surfaces_off_topic_citations(_kb, brief):
+    """The precision regression caught in adversarial review: a brief mentioning
+    "budget cap" or "economic order quantity" must NOT drag an emissions /
+    inventory citation into the S&OP deck. Grounding on the fixed keyword set
+    (not the brief) keeps citations on-topic regardless of client wording."""
+    cites = ip.gated_citations(brief, kb=_kb)
+    assert len(cites) >= MIN_CITATIONS
+    for cite in cites:
+        low = cite.lower()
+        assert any(term in low for term in _STRONG_SOP_TERMS), f"off-topic citation kept: {cite!r}"
+        assert not any(term in low for term in _OFF_TOPIC_TERMS), f"off-topic citation kept: {cite!r}"
+
+
+def test_citations_are_brief_independent(_kb):
+    """These citations ground the S&OP *method*, not the client's numbers, so
+    they must be identical across every brief -- deterministic and auditable,
+    never a function of incidental brief wording."""
+    results = {ip.gated_citations(b, kb=_kb) for b in (*_REALISTIC_SOP_BRIEFS, *_NOISY_SOP_BRIEFS)}
+    assert len(results) == 1, f"citations varied by brief: {results}"
+
+
+def test_gated_citations_are_capped_to_a_tight_set(_kb):
+    """The wider candidate pool feeds the gate but must not bloat the deck: the
+    returned, displayed set stays bounded."""
+    for brief in _REALISTIC_SOP_BRIEFS:
+        assert len(ip.gated_citations(brief, kb=_kb)) <= ip._MAX_CITATIONS
