@@ -40,3 +40,33 @@ jobs:
           python examples/run_batch.py --output output/ci_batch.csv
         env:
           PYTHONPATH: .
+
+  # Reproduces the PRODUCTION container's import surface. The Fly image builds
+  # with `pip install -e ".[web,mcp]"` (see Dockerfile) -- NOT
+  # requirements-dev.txt -- so a module on the app's boot chain that
+  # hard-imports an optional-extra dependency (bs4 / price-parser / rapidfuzz /
+  # python-stdnum / ...) sails through the `test` job above (those deps are
+  # present transitively in the dev install) yet crashes prod on boot, with the
+  # app never binding 0.0.0.0:8000. That exact failure took production down on
+  # 2026-07-16. This job installs ONLY the production extras and imports the app
+  # the way uvicorn does, so any such regression fails the PR instead of the
+  # deployment.
+  prod-boot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"  # matches Dockerfile `FROM python:3.12-slim`
+
+      - name: Install ONLY the production extras (mirrors the Dockerfile)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[web,mcp]"
+
+      - name: Import the app the way uvicorn does (must boot without dev/optional extras)
+        run: python -c "import webapp.app; print('prod boot import OK')"
+        env:
+          PYTHONPATH: .
