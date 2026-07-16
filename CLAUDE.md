@@ -178,6 +178,15 @@ See [`knowledge/graph-memory/README.md`](knowledge/graph-memory/README.md).
 - **Never read or surface PII** — some datasets (e.g. DataCo) carry customer PII;
   analysis is aggregate-only.
 - **Don't paste secrets** (API keys) into chat or commits.
+- **Prod boots on `.[web,mcp]` only** — the `prod-boot` CI job imports `webapp.app`
+  with just the production extras installed (mirrors the Dockerfile). Never add a
+  *module-level* import of an optional-extra dep (`bs4`, `rapidfuzz`, `price-parser`,
+  `python-stdnum`, `extruct`, ...) to any module on the app's boot chain
+  (`webapp.app` → `scm_agent` → `tools` → `jobs` → `src`): import it lazily inside the
+  function that uses it, or the app crashes on boot even though the full suite/CI stays
+  green (those deps are present transitively in dev). See
+  `tests/test_pricing_intel_boot_safety.py` and the `prod-boot` job in
+  `.github/workflows/tests.yml`.
 - The **books graph** (L3) needs an LLM backend (Kimi/Gemini) to rebuild; the
   **code graph** is AST-only (no key) and the hook handles it.
 
