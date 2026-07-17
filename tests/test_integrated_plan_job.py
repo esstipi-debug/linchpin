@@ -85,14 +85,17 @@ def test_promo_scenario_end_to_end(tmp_path):
 
     promo = by_id["SKU-PROMO"]
     assert promo.source == PRICE_OPTIMIZER_SOURCE
-    # elasticity -2.0, price 3.0 (median of 4,4,2,2) -> 2.0 (p* = c*e/(e+1), c=1.0):
-    # ratio = (2/3)**-2 - 1 = 1.25 -> +125% -> shaped = 20 * 2.25 = 45.0
-    assert promo.demand_shift_pct == pytest.approx(125.0, abs=0.01)
-    assert promo.shaped_demand == pytest.approx(45.0, abs=0.01)
+    # elasticity -2.0, current price 3.0 (median of 4,4,2,2) -> unconstrained
+    # p* = c*e/(e+1) = 2.0 (c=1.0), a 33% cut -- the optimizer's default
+    # +/-20% per-step move band clamps it to 3.0 * 0.8 = 2.4 (the observed
+    # range band [2/1.3, 4*1.3] does not bind):
+    # ratio = (2.4/3)**-2 - 1 = 0.5625 -> +56.25% -> shaped = 20 * 1.5625 = 31.25
+    assert promo.demand_shift_pct == pytest.approx(56.25, abs=0.01)
+    assert promo.shaped_demand == pytest.approx(31.25, abs=0.01)
 
     purchase_by_id = {line.product_id: line for line in bundle.plan.purchase_plan}
     promo_purchase = purchase_by_id["SKU-PROMO"]
-    assert promo_purchase.recommended_order == pytest.approx(40.0, abs=0.01)  # 45 - 5 - 0
+    assert promo_purchase.recommended_order == pytest.approx(26.25, abs=0.01)  # 31.25 - 5 - 0
 
     checks_by_kind = {}
     for c in bundle.plan.checks:
@@ -103,7 +106,7 @@ def test_promo_scenario_end_to_end(tmp_path):
     failed_promo = next(c for c in promo_coverage_results if c.product_id == "SKU-PROMO")
     assert failed_promo.passed is False
     assert "SKU-PROMO" in failed_promo.message
-    assert "45.0" in failed_promo.message  # shaped demand, citable
+    assert "31.2" in failed_promo.message  # shaped demand (31.25 at :.1f), citable
 
     service_results = checks_by_kind[CHECK_SERVICE_LEVEL]
     assert any(c.product_id == "SKU-A" and c.passed for c in service_results)

@@ -89,7 +89,7 @@ from __future__ import annotations
 
 import os
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
@@ -613,12 +613,56 @@ class GuardrailGateResult:
     citations: tuple[str, ...]
 
 
+# Default sanity backstop for gate_price_changeset's max-%-move check: no
+# single staged price change may move a live price by more than this fraction,
+# whatever produced it (optimizer output or a manually-typed price list). The
+# optimizer's own per-step band (src/price_optimizer.py, +/-20%) is tighter;
+# this is the last line of defense, so it is deliberately looser.
+GATE_MAX_MOVE_PCT_DEFAULT = 0.5
+
+
+def _economic_violations(
+    changeset: Changeset,
+    *,
+    max_move_pct: float | None,
+    landed_costs: Mapping[str, float] | None,
+) -> list[str]:
+    """Every economic-sanity violation in a staged price changeset (audit
+    fix 3): moves beyond ``max_move_pct`` and, when the caller supplies
+    ``landed_costs``, prices below cost. All violations are reported, not
+    just the first."""
+    violations: list[str] = []
+    for change in changeset.changes:
+        if change.is_noop or isinstance(change.after, bool) or not isinstance(change.after, (int, float)):
+            continue
+        after = float(change.after)
+        before = change.before
+        has_numeric_before = isinstance(before, (int, float)) and not isinstance(before, bool)
+        if max_move_pct is not None and has_numeric_before and float(before) > 0:
+            move = abs(after / float(before) - 1.0)
+            if move > max_move_pct:
+                violations.append(
+                    f"{change.entity_id}: proposed {change.field} {after} is a {move * 100:.1f}% move from "
+                    f"current {float(before)}, beyond the {max_move_pct * 100:.0f}% max-move sanity band"
+                )
+        if landed_costs is not None:
+            cost = landed_costs.get(change.entity_id)
+            if cost is not None and after < float(cost):
+                violations.append(
+                    f"{change.entity_id}: proposed {change.field} {after} is below landed cost {float(cost)} -- "
+                    "selling below cost needs an explicit human decision, not an automated changeset"
+                )
+    return violations
+
+
 def gate_price_changeset(
     changeset: Changeset,
     *,
     kb: KnowledgeBase,
     candidate_citations: Sequence[GroundedCitation],
     tool_key: str = "pricing",
+    max_move_pct: float | None = GATE_MAX_MOVE_PCT_DEFAULT,
+    landed_costs: Mapping[str, float] | None = None,
 ) -> GuardrailGateResult:
     """The central pre-ship gate for ANY proposed price changeset --
     PR-16's ``price_optimizer`` output, this module's own discount
@@ -632,16 +676,26 @@ def gate_price_changeset(
     second citation mechanism is built here either).
 
     ``approved=False`` when ``changeset.reason`` is empty/blank, OR when
-    ``candidate_citations`` does not survive ``filter_citations`` (fewer
-    than its ``MIN_CITATIONS`` resolve) -- either failure alone is enough
-    to block.
+    any change fails an economic sanity check (a move beyond
+    ``max_move_pct`` -- default 50%, ``None`` disables -- or, when
+    ``landed_costs`` is supplied, a price below cost; ``min_margin_pct``/
+    ``floor_ratio`` of 0 upstream provide no floor, so the gate is the
+    backstop), OR when ``candidate_citations`` does not survive
+    ``filter_citations`` (fewer than its ``MIN_CITATIONS`` resolve) -- any
+    failure alone is enough to block.
     """
+    if max_move_pct is not None and max_move_pct <= 0:
+        raise ValueError("max_move_pct must be > 0 when given (None disables the move check)")
     if not changeset.reason or not changeset.reason.strip():
         return GuardrailGateResult(
             approved=False,
             reason="changeset is missing a human-legible explanation (writeback.Changeset.reason)",
             citations=(),
         )
+
+    violations = _economic_violations(changeset, max_move_pct=max_move_pct, landed_costs=landed_costs)
+    if violations:
+        return GuardrailGateResult(approved=False, reason="; ".join(violations), citations=())
 
     gate = filter_citations(kb, tool_key, list(candidate_citations))
     if not gate.kept:

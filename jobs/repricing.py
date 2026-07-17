@@ -35,7 +35,7 @@ from dataclasses import dataclass
 from scm_agent.knowledge import GroundedCitation, KnowledgeBase
 from src import writeback
 from src.price_optimizer import PriceOptimizationResult
-from src.pricing_guardrails import GuardrailGateResult, gate_price_changeset
+from src.pricing_guardrails import GATE_MAX_MOVE_PCT_DEFAULT, GuardrailGateResult, gate_price_changeset
 
 # L3 citation grounding for the central gate (scm_agent.citation_gate's
 # already-registered "pricing" tool_key anchors: basic_pricing_theory /
@@ -114,6 +114,8 @@ def stage_repricing(
     reason: str,
     kb: KnowledgeBase | None = None,
     candidate_citations: list[GroundedCitation] | None = None,
+    max_move_pct: float | None = GATE_MAX_MOVE_PCT_DEFAULT,
+    landed_costs: dict[str, float] | None = None,
 ) -> writeback.Changeset:
     """Build a dry-run price ``Changeset`` for one channel (per
     ``writeback.stage()``) and gate it through PR-17's central pricing
@@ -130,13 +132,21 @@ def stage_repricing(
     supply one here surfaces that failure at the call site instead of a
     generic gate error later. Raises :class:`RepricingGuardrailBlocked` --
     never returns a changeset that failed the gate.
+
+    ``max_move_pct``/``landed_costs`` are forwarded verbatim to the gate's
+    economic sanity checks (max % move per change, default 50%; below-cost
+    block when landed costs are supplied) -- see
+    :func:`src.pricing_guardrails.gate_price_changeset`.
     """
     edits = {sku: {"price": price} for sku, price in prices.items()}
     changeset = writeback.stage(
         store, channel, edits, risk_tier=TIER, idempotency_key=idempotency_key, reason=reason,
     )
     citations = candidate_citations if candidate_citations is not None else gated_citations(reason, kb=kb)
-    gate = gate_price_changeset(changeset, kb=kb or KnowledgeBase(), candidate_citations=citations, tool_key=_TOOL_KEY)
+    gate = gate_price_changeset(
+        changeset, kb=kb or KnowledgeBase(), candidate_citations=citations, tool_key=_TOOL_KEY,
+        max_move_pct=max_move_pct, landed_costs=landed_costs,
+    )
     if not gate.approved:
         raise RepricingGuardrailBlocked(channel, gate)
     return changeset

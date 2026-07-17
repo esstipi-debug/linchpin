@@ -77,6 +77,35 @@ def test_stage_repricing_approves_with_a_real_reason_and_real_citations():
     assert cs.changes[0].after == 18.0
 
 
+def test_stage_repricing_blocks_a_move_beyond_the_gate_sanity_band():
+    """A 75% cut (20.0 -> 5.0) trips the central gate's default max-move
+    backstop -- no explicit opt-in needed at the repricing layer."""
+    store = _price_store()
+    with pytest.raises(RepricingGuardrailBlocked):
+        stage_repricing(store, "shopify:demo", {"SKU-1": 5.0}, idempotency_key="r1", reason=REASON)
+    assert store.read("SKU-1")["price"] == 20.0
+    assert store.applied_keys() == set()
+
+
+def test_stage_repricing_blocks_below_cost_when_landed_costs_supplied():
+    store = _price_store()
+    with pytest.raises(RepricingGuardrailBlocked):
+        stage_repricing(
+            store, "shopify:demo", {"SKU-1": 18.0}, idempotency_key="r1", reason=REASON,
+            landed_costs={"SKU-1": 19.0},
+        )
+    assert store.read("SKU-1")["price"] == 20.0
+
+
+def test_stage_repricing_passes_when_price_covers_landed_cost():
+    store = _price_store()
+    cs = stage_repricing(
+        store, "shopify:demo", {"SKU-1": 18.0}, idempotency_key="r1", reason=REASON,
+        landed_costs={"SKU-1": 15.0},
+    )
+    assert cs.changes[0].after == 18.0
+
+
 # ---- apply_repricing: approval required, never auto-applies ---------------------
 
 
