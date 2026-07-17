@@ -271,3 +271,43 @@ def test_min_points_for_se_constant_is_three():
     # Sanity guard: MIN_POINTS_FOR_SE must stay 3 (df = n - 2 >= 1) for the
     # rest of this file's hand-verified arithmetic to hold.
     assert MIN_POINTS_FOR_SE == 3
+
+
+def test_fits_carry_the_observed_price_range():
+    """estimate_portfolio_elasticities records the min/max prices each fit
+    was actually estimated on -- src/price_optimizer.py clamps proposals to
+    ~1.3x this range (extrapolation guard ported from
+    src.pricing.recommend_price)."""
+    result = estimate_portfolio_elasticities(_portfolio_frame(), category_col="category")
+    assert result["RICH1"].price_low == pytest.approx(math.exp(0))
+    assert result["RICH1"].price_high == pytest.approx(math.exp(3))
+    assert result["THIN"].price_low == pytest.approx(math.exp(0))
+    assert result["THIN"].price_high == pytest.approx(math.exp(1))
+
+
+def test_observed_price_range_ignores_nonpositive_points():
+    """The range must cover only the (price > 0, quantity > 0) points the
+    OLS itself saw -- the same mask estimate_elasticity applies."""
+    df = pd.DataFrame(
+        {
+            "product_id": ["A"] * 5,
+            "price": [-1.0, 0.0, 2.0, 4.0, 8.0],
+            "quantity": [10.0, 10.0, 16.0, 4.0, 1.0],
+        }
+    )
+    result = estimate_portfolio_elasticities(df)
+    assert result["A"].price_low == pytest.approx(2.0)
+    assert result["A"].price_high == pytest.approx(8.0)
+
+
+def test_observed_price_range_is_none_when_no_positive_points():
+    df = pd.DataFrame(
+        {
+            "product_id": ["A", "A"],
+            "price": [0.0, -3.0],
+            "quantity": [10.0, 12.0],
+        }
+    )
+    result = estimate_portfolio_elasticities(df)
+    assert result["A"].price_low is None
+    assert result["A"].price_high is None

@@ -106,6 +106,28 @@ def test_needs_data_when_shrunk_elasticity_is_inelastic():
     assert "inelastic" in result.reason
 
 
+def test_needs_data_when_ci_does_not_exclude_minus_one():
+    """The audit case: eps = -1.05 with a CI that excludes zero but NOT -1
+    used to ship p* = 10 * (-1.05)/(-0.05) = 210 (21x cost) with status 'ok'.
+    The markup formula p* = c*eps/(eps+1) explodes as eps -> -1 from below,
+    so the statistical gate must require the CI to exclude -1 (ci_high < -1),
+    not merely exclude zero."""
+    fit = _fit(elasticity=-1.05, ci_low=-2.0, ci_high=-0.1, ci_excludes_zero=True, shrunk_elasticity=-1.05)
+    result = optimize_sku_price(fit, landed_cost=10.0)
+    assert result.status == "needs_data"
+    assert result.proposed_price is None
+    assert "-1" in result.reason and "exclude" in result.reason.lower()
+
+
+def test_ci_safely_below_minus_one_still_prices():
+    """A CI wholly inside the elastic region (ci_high < -1) must keep pricing
+    -- the new gate blocks the unstable-near--1 case, not healthy fits."""
+    fit = _fit(elasticity=-3.0, ci_low=-3.5, ci_high=-2.5, shrunk_elasticity=-3.0)
+    result = optimize_sku_price(fit, landed_cost=10.0)
+    assert result.status == "ok"
+    assert result.proposed_price == pytest.approx(15.0)
+
+
 def test_uses_shrunk_elasticity_not_raw_own_elasticity():
     """When both are present, the (category-shrunk) elasticity drives the
     price, not the SKU's raw own-OLS estimate."""
@@ -130,6 +152,109 @@ def test_max_price_caps_proposal_and_flags_it():
     result = optimize_sku_price(fit, landed_cost=10.0, max_price=12.0)
     assert result.proposed_price == pytest.approx(12.0)
     assert result.price_capped is True
+
+
+# ---- move-size clamp vs current_price (audit fix 2) ------------------------------
+
+
+def _near_minus_one_fit() -> SkuElasticityFit:
+    """eps = -1.5 -> unconstrained p* = 10 * 3 = 30.0, with a CI safely
+    inside the elastic region so only the clamps are under test."""
+    return _fit(elasticity=-1.5, ci_low=-2.0, ci_high=-1.2, shrunk_elasticity=-1.5)
+
+
+def test_move_clamp_limits_proposal_to_default_band_vs_current_price():
+    """eps = -1.5 -> p* = 30.0, but from a current price of 16.0 the default
+    +/-20% band caps the step at 16 * 1.2 = 19.2 -- and the result says so."""
+    result = optimize_sku_price(_near_minus_one_fit(), landed_cost=10.0, current_price=16.0)
+    assert result.status == "ok"
+    assert result.proposed_price == pytest.approx(19.2)
+    assert result.move_clamped is True
+
+
+def test_move_clamp_band_is_configurable():
+    result = optimize_sku_price(
+        _near_minus_one_fit(), landed_cost=10.0, current_price=16.0, max_move_pct=0.5,
+    )
+    assert result.proposed_price == pytest.approx(24.0)  # 16 * 1.5
+    assert result.move_clamped is True
+
+
+def test_move_clamp_disabled_with_none():
+    result = optimize_sku_price(
+        _near_minus_one_fit(), landed_cost=10.0, current_price=16.0, max_move_pct=None,
+    )
+    assert result.proposed_price == pytest.approx(30.0)
+    assert result.move_clamped is False
+
+
+def test_no_move_clamp_without_a_current_price():
+    result = optimize_sku_price(_near_minus_one_fit(), landed_cost=10.0)
+    assert result.proposed_price == pytest.approx(30.0)
+    assert result.move_clamped is False
+
+
+def test_move_clamp_also_limits_downward_moves():
+    """eps = -3 -> p* = 15.0; from a current price of 30.0 the default band
+    floor is 30 * 0.8 = 24.0 -- steps down are clamped too, not just raises."""
+    fit = _fit(elasticity=-3.0, shrunk_elasticity=-3.0)
+    result = optimize_sku_price(fit, landed_cost=10.0, current_price=30.0)
+    assert result.proposed_price == pytest.approx(24.0)
+    assert result.move_clamped is True
+
+
+def test_max_move_pct_must_be_positive_when_given():
+    with pytest.raises(ValueError):
+        optimize_sku_price(_near_minus_one_fit(), landed_cost=10.0, current_price=16.0, max_move_pct=0.0)
+    with pytest.raises(ValueError):
+        optimize_sku_price(_near_minus_one_fit(), landed_cost=10.0, current_price=16.0, max_move_pct=-0.2)
+
+
+def test_cost_floor_wins_over_the_move_clamp():
+    """A current price below cost must never trap the proposal below cost:
+    the landed-cost floor overrides the move band (and both are flagged)."""
+    fit = _fit(elasticity=-3.0, shrunk_elasticity=-3.0)  # p* = 15.0
+    result = optimize_sku_price(fit, landed_cost=10.0, current_price=5.0)
+    # move band would cap at 5 * 1.2 = 6.0, but that is below landed cost 10.0
+    assert result.proposed_price == pytest.approx(10.0)
+    assert result.floor_applied is True
+    assert result.move_clamped is True
+
+
+# ---- observed-price-range clamp (ported from src.pricing.recommend_price) --------
+
+
+def test_range_clamp_limits_extrapolation_beyond_observed_prices():
+    """The fit only saw prices in [12, 18]; the proposal is clamped to at
+    most 1.3x the observed range (18 * 1.3 = 23.4) -- beyond that the curve
+    is extrapolation, not interpolation (same guard as recommend_price)."""
+    fit = _fit(
+        elasticity=-1.5, ci_low=-2.0, ci_high=-1.2, shrunk_elasticity=-1.5,
+        price_low=12.0, price_high=18.0,
+    )
+    result = optimize_sku_price(fit, landed_cost=10.0)  # unconstrained p* = 30.0
+    assert result.proposed_price == pytest.approx(23.4)
+    assert result.range_clamped is True
+
+
+def test_no_range_clamp_when_fit_carries_no_observed_range():
+    result = optimize_sku_price(_near_minus_one_fit(), landed_cost=10.0)
+    assert result.proposed_price == pytest.approx(30.0)
+    assert result.range_clamped is False
+
+
+def test_move_clamp_binds_after_the_range_clamp():
+    """Both clamps engage: range trims 30.0 -> 23.4, then the +/-20% band vs
+    current price 16.0 trims further to 19.2 -- the tighter, operational
+    constraint wins, and both are disclosed."""
+    fit = _fit(
+        elasticity=-1.5, ci_low=-2.0, ci_high=-1.2, shrunk_elasticity=-1.5,
+        price_low=12.0, price_high=18.0,
+    )
+    result = optimize_sku_price(fit, landed_cost=10.0, current_price=16.0)
+    assert result.proposed_price == pytest.approx(19.2)
+    assert result.range_clamped is True
+    assert result.move_clamped is True
 
 
 def test_competitor_context_surfaced_never_overrides_price():
@@ -182,3 +307,20 @@ def test_portfolio_mixes_ok_and_needs_data_results_in_one_call():
     assert results["NO_SIGNAL_SKU"].status == "needs_data"
     assert results["NO_COST_SKU"].status == "needs_data"
     assert "landed cost" in results["NO_COST_SKU"].reason
+
+
+def test_portfolio_applies_the_move_clamp_per_sku():
+    """current_prices flowing into the portfolio call engage the same
+    per-step band as the single-SKU path (default +/-20%)."""
+    fits = {"SKU1": _fit(product_id="SKU1", elasticity=-3.0, shrunk_elasticity=-3.0)}  # p* = 15.0
+    results = optimize_portfolio_prices(
+        fits, landed_costs={"SKU1": 10.0}, current_prices={"SKU1": 10.0},
+    )
+    assert results["SKU1"].proposed_price == pytest.approx(12.0)  # 10 * 1.2, not 15.0
+    assert results["SKU1"].move_clamped is True
+
+    unclamped = optimize_portfolio_prices(
+        fits, landed_costs={"SKU1": 10.0}, current_prices={"SKU1": 10.0}, max_move_pct=None,
+    )
+    assert unclamped["SKU1"].proposed_price == pytest.approx(15.0)
+    assert unclamped["SKU1"].move_clamped is False

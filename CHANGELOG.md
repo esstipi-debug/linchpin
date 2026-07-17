@@ -46,6 +46,24 @@
   caught by hand). To activate live: `flyctl secrets set SENTRY_DSN=... -a linchpin`.
 
 ### Fixed
+- **`optimize_sku_price` could ship an exploding markup as `status="ok"`** (adversarial pricing
+  audit, 3 findings). (1) *Wrong statistical gate*: the optimizer gated on the elasticity CI
+  excluding **0**, but the constant-elasticity markup `p* = c*eps/(eps+1)` explodes as
+  `eps -> -1` from below — `eps = -1.05` implied a price of **21x cost**, shipped as `ok`. The
+  gate now also requires the SKU's own CI to exclude **-1** in the elastic direction
+  (`ci_high < -1`), else `needs_data` with an honest reason. (2) *No move-size clamp*:
+  `current_price` was carried but never used in any guard. Proposals are now clamped to a
+  configurable per-step band vs the live price (`max_move_pct`, default +/-20%, `None`
+  disables) and to ~1.3x the observed price range the elasticity was fitted on
+  (`SkuElasticityFit.price_low/price_high`, the same extrapolation guard
+  `src.pricing.recommend_price` already applied to its `confident` flag) — both disclosed on
+  the result (`move_clamped`/`range_clamped`); the landed-cost/margin floor still wins over
+  both clamps. (3) *Gate had no economic sanity checks*:
+  `src/pricing_guardrails.py::gate_price_changeset` (the central pre-ship gate) now blocks any
+  staged change moving a price beyond `max_move_pct` (default 50% backstop, `None` disables)
+  and — when the caller supplies `landed_costs` (forwarded from
+  `jobs/repricing.py::stage_repricing`) — any price below cost, since `min_margin_pct`/
+  `floor_ratio` of 0 upstream provide no floor. All violations reported at once. 26 tests.
 - **Package deliverables shipped with ZERO L3 citations for 6 tools in every package that runs
   them** (3.0-audit finding #7, the widest blast radius of the citation fixes below).
   `scm_agent/packages.py::_run_step` grounded each step's citations with the same `limit=3`

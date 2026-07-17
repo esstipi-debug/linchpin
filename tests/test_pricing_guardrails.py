@@ -370,10 +370,10 @@ def _cite(node_id: str) -> GroundedCitation:
     return GroundedCitation(text=f"Citation for {node_id}", node_id=node_id, graph="books")
 
 
-def _changeset(*, reason: str) -> Changeset:
+def _changeset(*, reason: str, before: float | None = 100.0, after: float = 70.0) -> Changeset:
     return Changeset(
         target="test_target",
-        changes=(Change(entity_id="SKU-1", field="price", before=100.0, after=70.0),),
+        changes=(Change(entity_id="SKU-1", field="price", before=before, after=after),),
         risk_tier="reversible",
         idempotency_key="test-key-1",
         reason=reason,
@@ -417,3 +417,111 @@ def test_gate_approves_a_changeset_with_explanation_and_surviving_citations():
     assert result.approved is True
     assert result.reason is None
     assert len(result.citations) == 2
+
+
+# ---- economic sanity checks (audit fix 3): max % move + below-cost ---------------
+
+_GOOD_REASON = "Repricing SKU-1 off its fitted elasticity to close a margin gap."
+
+
+def _kb_and_citations():
+    kb = _FakeKB({"basic_pricing_theory", "price_sensitivity_measurement"})
+    return kb, [_cite("basic_pricing_theory"), _cite("price_sensitivity_measurement")]
+
+
+def test_gate_blocks_a_move_beyond_the_max_move_band():
+    """100 -> 30 is a 70% cut -- beyond the default 50% sanity backstop, the
+    changeset must not ship even with a reason and surviving citations."""
+    kb, citations = _kb_and_citations()
+    result = gate_price_changeset(_changeset(reason=_GOOD_REASON, after=30.0), kb=kb, candidate_citations=citations)
+    assert result.approved is False
+    assert "move" in result.reason.lower()
+    assert "SKU-1" in result.reason
+
+
+def test_gate_max_move_none_disables_the_move_check():
+    kb, citations = _kb_and_citations()
+    result = gate_price_changeset(
+        _changeset(reason=_GOOD_REASON, after=30.0), kb=kb, candidate_citations=citations, max_move_pct=None,
+    )
+    assert result.approved is True
+
+
+def test_gate_move_band_is_configurable():
+    kb, citations = _kb_and_citations()
+    result = gate_price_changeset(
+        _changeset(reason=_GOOD_REASON, after=70.0), kb=kb, candidate_citations=citations, max_move_pct=0.2,
+    )
+    assert result.approved is False  # 30% cut > 20% band
+
+
+def test_gate_move_check_skips_changes_without_a_numeric_positive_before():
+    """A brand-new price (no stored 'before') has no move to measure -- the
+    check must skip it, not crash or block."""
+    kb, citations = _kb_and_citations()
+    result = gate_price_changeset(
+        _changeset(reason=_GOOD_REASON, before=None, after=70.0), kb=kb, candidate_citations=citations,
+    )
+    assert result.approved is True
+
+
+def test_gate_max_move_pct_must_be_positive_when_given():
+    kb, citations = _kb_and_citations()
+    with pytest.raises(ValueError):
+        gate_price_changeset(
+            _changeset(reason=_GOOD_REASON), kb=kb, candidate_citations=citations, max_move_pct=0.0,
+        )
+
+
+def test_gate_blocks_a_below_cost_price_when_landed_costs_are_given():
+    """min_margin_pct/floor_ratio of 0 upstream leave nothing preventing a
+    below-cost price -- the central gate is the backstop when the caller
+    supplies landed costs."""
+    kb, citations = _kb_and_citations()
+    result = gate_price_changeset(
+        _changeset(reason=_GOOD_REASON, after=70.0),
+        kb=kb, candidate_citations=citations, landed_costs={"SKU-1": 80.0},
+    )
+    assert result.approved is False
+    assert "below landed cost" in result.reason.lower()
+    assert "SKU-1" in result.reason
+
+
+def test_gate_approves_when_price_covers_landed_cost():
+    kb, citations = _kb_and_citations()
+    result = gate_price_changeset(
+        _changeset(reason=_GOOD_REASON, after=70.0),
+        kb=kb, candidate_citations=citations, landed_costs={"SKU-1": 60.0},
+    )
+    assert result.approved is True
+
+
+def test_gate_below_cost_check_skips_skus_without_a_known_cost():
+    kb, citations = _kb_and_citations()
+    result = gate_price_changeset(
+        _changeset(reason=_GOOD_REASON, after=70.0),
+        kb=kb, candidate_citations=citations, landed_costs={"OTHER-SKU": 999.0},
+    )
+    assert result.approved is True
+
+
+def test_gate_reports_every_economic_violation_at_once():
+    """Two changes, two different violations -- the blocking reason must
+    disclose both, not just the first one hit."""
+    kb, citations = _kb_and_citations()
+    changeset = Changeset(
+        target="test_target",
+        changes=(
+            Change(entity_id="SKU-1", field="price", before=100.0, after=30.0),  # 70% move
+            Change(entity_id="SKU-2", field="price", before=50.0, after=45.0),  # below cost 48
+        ),
+        risk_tier="reversible",
+        idempotency_key="test-key-2",
+        reason=_GOOD_REASON,
+    )
+    result = gate_price_changeset(
+        changeset, kb=kb, candidate_citations=citations, landed_costs={"SKU-2": 48.0},
+    )
+    assert result.approved is False
+    assert "SKU-1" in result.reason
+    assert "SKU-2" in result.reason

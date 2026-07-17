@@ -52,9 +52,11 @@ confidence interval only, never a shrinkage-adjusted one. A thin SKU
 therefore always reports ``ci_excludes_zero=False`` (there is no CI to
 exclude anything with) even though ``shrunk_elasticity`` is populated and
 economically informative -- this is deliberate: ``src/price_optimizer.py``
-gates an actual price *move* on ``ci_excludes_zero``, and moving a specific
-SKU's price off a category-borrowed number the SKU itself cannot statistically
-support is exactly the "fabricated number" the plan's QA invariants forbid.
+gates an actual price *move* on the SKU's own CI (``ci_excludes_zero`` AND
+``ci_high < -1``, since the markup formula is unstable near -1), and moving
+a specific SKU's price off a category-borrowed number the SKU itself cannot
+statistically support is exactly the "fabricated number" the plan's QA
+invariants forbid.
 The shrunk value is still useful for reporting / a category-level view; a
 category-CI-informed gate for thin SKUs is a documented future extension,
 intentionally left out of this PR's ~50-line-numpy scope.
@@ -204,6 +206,14 @@ class SkuElasticityFit:
     category_n_contributors: int
     shrinkage_weight: float | None  # None only when identified is False
     shrunk_elasticity: float | None  # None only when identified is False
+    # Observed price range the fit was estimated on (after the same
+    # price > 0 & quantity > 0 mask ``estimate_elasticity`` applies). The
+    # fitted curve is only validated inside this range -- ``src/
+    # price_optimizer.py`` clamps proposals to ~1.3x of it (the same
+    # extrapolation guard ``src.pricing.recommend_price`` applies). None when
+    # no positive point exists (or for hand-built fits that never saw data).
+    price_low: float | None = None
+    price_high: float | None = None
 
 
 def estimate_portfolio_elasticities(
@@ -235,6 +245,14 @@ def estimate_portfolio_elasticities(
         quantities = group[quantity_col].to_numpy(dtype=float)
         ci = fit_sku_elasticity_ci(prices, quantities)
 
+        # Observed price range over the exact points the OLS saw (same mask
+        # as estimate_elasticity) -- see SkuElasticityFit.price_low.
+        fitted_prices = prices[(prices > 0) & (quantities > 0)]
+        if fitted_prices.size:
+            price_low, price_high = float(fitted_prices.min()), float(fitted_prices.max())
+        else:
+            price_low, price_high = None, None
+
         if category_col is not None:
             categories = group[category_col].astype(str).unique()
             if len(categories) > 1:
@@ -245,7 +263,7 @@ def estimate_portfolio_elasticities(
         else:
             category = DEFAULT_CATEGORY
 
-        raw[pid] = {"ci": ci, "category": category}
+        raw[pid] = {"ci": ci, "category": category, "price_low": price_low, "price_high": price_high}
 
     # Pass 2: category-level precision-weighted mean + tau^2, from
     # contributing SKUs only (identified, se strictly positive and finite).
@@ -292,5 +310,7 @@ def estimate_portfolio_elasticities(
             category_n_contributors=category_n,
             shrinkage_weight=weight,
             shrunk_elasticity=shrunk,
+            price_low=r["price_low"],
+            price_high=r["price_high"],
         )
     return out
