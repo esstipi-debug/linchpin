@@ -104,6 +104,13 @@ TOOL_CONCEPTS: dict[str, tuple[str, ...]] = {
     "vehicle_routing": ("route_sheet", "last_mile_delivery"),
     "price_intelligence": ("price_competition", "competition_oriented_pricing", "price_positioning"),
     "price_watch": ("price_competition", "competition_oriented_pricing", "price_positioning"),
+    # promotion_timing was rejected as an anchor: it is 1 hop from the Chopra & Meindl
+    # book hub, so at MAX_HOPS=2 the whole Chopra book self-validates (2-hop closure
+    # 330 -> 650 nodes, pulling in 39 off-topic discount/pricing/capacity magnets - the
+    # shared-book-hub loophole EXCLUDED_CONCEPTS exists for). These three anchors are each
+    # 3 hops from that hub; their combined closure is 330 nodes with 4 mild magnets, two of
+    # which are excluded below. Verified by graph BFS 2026-07-18.
+    "launch_readiness": ("new_product_forecasting", "risk_period", "lead_time_gap"),
 }
 
 # tool_key -> concept ids that must NEVER be cited for this tool, even when
@@ -126,6 +133,10 @@ EXCLUDED_CONCEPTS: dict[str, tuple[str, ...]] = {
     # scm_agent/packages.py::_step_citations); excluding it restores the on-topic
     # "Value Recovery" citation in its place.
     "returns": ("reverse_auction",),
+    # The two in-radius mild magnets from the launch_readiness anchors' 2-hop closure
+    # (facility_location, capacity_planning) - unrelated to a stock-coverage-for-launch
+    # check. Both verified to exist in the graph (test_every_excluded_concept_exists).
+    "launch_readiness": ("facility_location", "capacity_planning"),
 }
 
 
