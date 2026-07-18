@@ -91,6 +91,48 @@ def test_offer_page_cta_uses_stripe_link_when_configured(monkeypatch) -> None:
     assert "https://buy.stripe.com/diag123" in html
 
 
+def test_index_shows_band_picker_widget_on_gmv_band_offers() -> None:
+    """Starter/Growth/Scale/Retainer have GMV-band pricing (webapp/pricing_quote.py)
+    -- their cards get an additive band-picker widget keyed to the API's
+    package_key vocabulary (starter/growth/scale/retainer)."""
+    html = render_index_html(OFFERS, _PROFILE)
+    gmv_band = {
+        "starter-fundamentos": "starter",
+        "growth-operacion": "growth",
+        "scale-red-sop": "scale",
+        "retainer-ejecutivo": "retainer",
+    }
+    for slug, package_key in gmv_band.items():
+        assert f'data-slug="{slug}"' in html
+        assert f'data-package="{package_key}"' in html
+    assert "/api/pricing-quote" in html
+    assert "Calcular" in html
+
+
+def test_index_omits_band_picker_widget_on_non_gmv_band_offers() -> None:
+    """diagnostico/starter_latam/proyecto_*/liquidacion have no GMV-band pricing --
+    /api/pricing-quote 400s for them, so they must NOT get the widget."""
+    html = render_index_html(OFFERS, _PROFILE)
+    non_gmv_band_slugs = (
+        "diagnostico-arranque",
+        "starter-fundamentos-latam",
+        "proyecto-red-almacen",
+        "proyecto-sourcing",
+        "sprint-liquidacion",
+        "diagnostico-posicion-precios",
+    )
+    for slug in non_gmv_band_slugs:
+        assert f'data-slug="{slug}"' not in html
+
+
+def test_index_band_picker_is_additive_static_price_string_unchanged() -> None:
+    """The band-picker widget must be purely additive: every offer's existing
+    static escape(offer.price) anchor still renders, byte-for-byte, unchanged."""
+    html = render_index_html(OFFERS, _PROFILE)
+    for offer in OFFERS:
+        assert f'<div class="price">{escape(offer.price)}</div>' in html
+
+
 def test_offer_page_inline_script_has_balanced_braces() -> None:
     """Regression test: an f-string brace-escaping slip (`}}` instead of `}` on a
     plain, non-f-string line) previously produced invalid JS that silently broke

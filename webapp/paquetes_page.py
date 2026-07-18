@@ -74,6 +74,13 @@ _HEAD = """<!DOCTYPE html>
   .card-cta{{margin-top:8px;display:flex;gap:8px;flex-wrap:wrap}}
   .card-cta .btn{{padding:9px 14px;font-size:13px}}
   .detail-link{{margin-top:2px;font-size:13px;font-weight:600;color:var(--accent-bright)}}
+  .band-picker{{margin-top:4px;padding-top:10px;border-top:1px dashed var(--line-2)}}
+  .band-picker-label{{display:block;font-size:12px;color:var(--faint);margin-bottom:6px}}
+  .band-picker-inputs{{display:flex;gap:6px;flex-wrap:wrap}}
+  .band-input{{flex:1 1 108px;min-width:0;background:var(--panel-2);border:1px solid var(--line-2);border-radius:8px;color:var(--txt);font:500 12.5px/1 var(--sans);padding:8px 9px}}
+  .band-input:focus{{outline:none;border-color:var(--accent-bd)}}
+  .band-picker-btn{{padding:8px 12px !important;font-size:12.5px !important}}
+  .band-picker-result{{min-height:1.2em;margin-top:8px;font:600 13px/1.4 var(--mono);color:var(--accent-bright)}}
   .operator{{display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap}}
   .operator img{{width:76px;height:76px;border-radius:50%;object-fit:cover;border:1px solid var(--line-2)}}
   .operator .avatar-fallback{{width:76px;height:76px;border-radius:50%;background:var(--panel-2);border:1px solid var(--line-2);display:flex;align-items:center;justify-content:center;font:700 22px/1 var(--mono);color:var(--faint)}}
@@ -113,6 +120,94 @@ _FOOT = """
 """
 
 
+# Offers with real GMV-band pricing behind GET /api/pricing-quote (Task 3,
+# webapp/pricing_quote.py) -> the package_key that endpoint's
+# _PACKAGE_KEY_ALIASES accepts. Only these four get the band-picker widget --
+# Diagnostico/Starter-LatAm/Proyecto-*/Liquidacion have no GMV band at all and
+# the endpoint 400s for them, so adding the widget there would just surface a
+# broken calculator.
+_GMV_BAND_PACKAGE_KEYS: dict[str, str] = {
+    "starter-fundamentos": "starter",
+    "growth-operacion": "growth",
+    "scale-red-sop": "scale",
+    "retainer-ejecutivo": "retainer",
+}
+
+
+def _band_picker_widget(offer: Offer) -> str:
+    """Additive band-picker: a revenue (+ optional SKU count) input pair and a
+    "Calcular" button that calls GET /api/pricing-quote client-side and prints
+    monthly_price inline. Empty string for offers with no GMV band (see
+    _GMV_BAND_PACKAGE_KEYS) -- never rendered next to their static price."""
+    package_key = _GMV_BAND_PACKAGE_KEYS.get(offer.slug)
+    if package_key is None:
+        return ""
+    slug = escape(offer.slug)
+    revenue_id = f"band-revenue-{slug}"
+    skus_id = f"band-skus-{slug}"
+    result_id = f"band-result-{slug}"
+    return (
+        f'<div class="band-picker" data-slug="{slug}" data-package="{escape(package_key)}">'
+        f'<label class="band-picker-label" for="{revenue_id}">Calcula tu precio real por tu revenue anual</label>'
+        '<div class="band-picker-inputs">'
+        f'<input type="number" min="0" step="1000" inputmode="numeric" class="band-input" '
+        f'id="{revenue_id}" placeholder="Revenue anual USD">'
+        f'<input type="number" min="0" step="1" inputmode="numeric" class="band-input" '
+        f'id="{skus_id}" placeholder="SKUs (opcional)">'
+        '<button type="button" class="btn btn-ghost band-picker-btn" '
+        f'data-package="{escape(package_key)}" data-revenue-id="{revenue_id}" '
+        f'data-skus-id="{skus_id}" data-result-id="{result_id}">Calcular</button>'
+        "</div>"
+        f'<div class="band-picker-result" id="{result_id}" aria-live="polite"></div>'
+        "</div>"
+    )
+
+
+# Single delegated-click handler shared by every card's band-picker button --
+# plain string (not an f-string), so JS braces need no doubling. Reads the
+# clicked button's data-* attributes, calls GET /api/pricing-quote, and prints
+# quote.monthly_price into that card's result slot. Mirrors the 400-as-data
+# contract documented in webapp/pricing_quote.py: a non-2xx response's JSON
+# body is still parsed and its "detail" surfaced, never an unhandled rejection.
+_BAND_PICKER_SCRIPT = """
+<script>
+document.querySelectorAll(".band-picker-btn").forEach(function (btn) {
+  btn.addEventListener("click", function () {
+    var pkg = btn.getAttribute("data-package");
+    var revenueEl = document.getElementById(btn.getAttribute("data-revenue-id"));
+    var skusEl = document.getElementById(btn.getAttribute("data-skus-id"));
+    var resultEl = document.getElementById(btn.getAttribute("data-result-id"));
+    var revenue = parseFloat(revenueEl.value);
+    if (!isFinite(revenue) || revenue < 0) {
+      resultEl.textContent = "Ingresa un revenue anual valido.";
+      return;
+    }
+    var url = "/api/pricing-quote?package=" + encodeURIComponent(pkg) + "&revenue=" + encodeURIComponent(revenue);
+    var skus = skusEl.value;
+    if (skus !== "") {
+      url += "&skus=" + encodeURIComponent(skus);
+    }
+    resultEl.textContent = "Calculando...";
+    fetch(url).then(function (r) {
+      return r.json().then(function (body) {
+        return { ok: r.ok, body: body };
+      });
+    }).then(function (res) {
+      if (!res.ok) {
+        resultEl.textContent = "No se pudo calcular (" + (res.body.detail || "error") + ").";
+        return;
+      }
+      var price = res.body.quote.monthly_price;
+      resultEl.textContent = "Tu precio: USD " + Math.round(price).toLocaleString("en-US") + " / mes";
+    }).catch(function () {
+      resultEl.textContent = "No se pudo calcular el precio (error de red).";
+    });
+  });
+});
+</script>
+"""
+
+
 def _cta_buttons(offer: Offer) -> str:
     agendar = resolve_agendar_cta(offer)
     pagar = resolve_pagar_cta(offer)
@@ -148,7 +243,10 @@ def _operator_block(profile: OperatorProfile) -> str:
 
 def render_index_html(offers: tuple[Offer, ...], profile: OperatorProfile) -> str:
     cards = []
+    has_band_picker = False
     for offer in offers:
+        band_picker_html = _band_picker_widget(offer)
+        has_band_picker = has_band_picker or bool(band_picker_html)
         cards.append(
             '<div class="card">'
             f'<h3>{escape(offer.name)}</h3>'
@@ -158,6 +256,7 @@ def render_index_html(offers: tuple[Offer, ...], profile: OperatorProfile) -> st
             f'<p class="field"><b>Para quien:</b> {escape(offer.para_quien)}</p>'
             f'<div class="card-cta">{_cta_buttons(offer)}</div>'
             f'<a class="detail-link" href="/paquetes/{escape(offer.slug)}">Ver detalle &rarr;</a>'
+            f"{band_picker_html}"
             "</div>"
         )
     body = (
@@ -173,6 +272,7 @@ def render_index_html(offers: tuple[Offer, ...], profile: OperatorProfile) -> st
         + f'<div class="grid">{"".join(cards)}</div>'
         + "</section>"
         + _operator_block(profile)
+        + (_BAND_PICKER_SCRIPT if has_band_picker else "")
         + _FOOT
     )
     return body
