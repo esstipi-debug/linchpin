@@ -319,3 +319,21 @@ def test_every_surviving_citation_is_re_derivable_and_within_hop_budget(diagnost
         candidates = kb.ground_citations_detailed(tool.intent_keywords, tool.title, limit=_CANDIDATE_POOL)
         rerun = filter_citations(kb, step.tool_key, candidates)
         assert rerun.kept[:_MAX_CITATIONS] == step.citations, step.tool_key
+
+
+def test_launch_readiness_drops_offtopic_pricing_and_capacity_citations():
+    """The launch_readiness anchors sit 3 hops from the Chopra book hub, so off-topic
+    discount/pricing nodes fall outside MAX_HOPS; the two in-radius magnets
+    (facility_location, capacity_planning) are dropped by EXCLUDED_CONCEPTS. Guards the
+    false-friend risk documented in the design spec (2026-07-18)."""
+    kb = KnowledgeBase()
+    offtopic = [
+        _cite("knowledge::dynamic_pricing"),
+        _cite("knowledge::all_unit_quantity_discount"),
+        _cite("knowledge::facility_location"),
+        _cite("knowledge::capacity_planning"),
+    ]
+    result = filter_citations(kb, "launch_readiness", offtopic)
+    assert result.kept == ()
+    joined = " ".join(result.omitted)
+    assert "facility_location" in joined and "capacity_planning" in joined

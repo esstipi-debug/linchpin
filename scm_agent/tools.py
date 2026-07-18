@@ -27,6 +27,7 @@ from jobs import (
     intake,
     inventory_deliverable,
     landed_cost_job,
+    launch_readiness_job,
     leadership,
     learning_curve_job,
     markdown_liquidation_job,
@@ -896,6 +897,55 @@ def scheduling_tool() -> Tool:
             scheduling_job.build_deck(report, client=client, citations=tuple(citations), confidence=confidence),
             options=tuple(options),
         ).write_all(out_dir),
+    )
+
+
+# ---- launch_readiness (campaign launch date vs lead time & coverage) ---------
+
+def _launch_readiness_prepare(request: JobRequest, provider: LLMProvider) -> Prepared:
+    if not request.data_path:
+        return Prepared(status="needs_data",
+                        messages=["a campaign CSV (product_id, launch_date) is required"])
+    if not request.params.get("inventory_path"):
+        return Prepared(status="needs_data",
+                        messages=["params['inventory_path'] (the inventory/lead-time CSV) is required"])
+    try:
+        payload = launch_readiness_job.prepare(request.data_path, request.params)
+    except (ValueError, FileNotFoundError) as exc:
+        return Prepared(status="needs_data", messages=[str(exc)])
+    return Prepared(status="ok", payload=payload)
+
+
+def _launch_readiness_run(payload: object, params: dict) -> Produced:
+    report = launch_readiness_job.run(payload)
+    return Produced(report=report, summary=report.summary)
+
+
+def launch_readiness_tool() -> Tool:
+    return Tool(
+        key="launch_readiness",
+        title="Launch Readiness",
+        description="Cross a campaign launch-date list against real supplier lead time and "
+                    "campaign-shaped stock coverage, returning a green/yellow/red readiness verdict "
+                    "per SKU with ranked actions - a report a human forwards; no marketing-tool "
+                    "integration.",
+        intent_keywords=(
+            "launch readiness", "campaign launch date", "marketing launch check",
+            "will the sku be in stock for launch", "product ready for launch",
+            "campaign stock coverage", "launch date lead time",
+        ),
+        requires_data=True,
+        prepare=_launch_readiness_prepare,
+        run=_launch_readiness_run,
+        qa=lambda report: launch_readiness_job.verify(report),
+        deliver=lambda report, out_dir, client: launch_readiness_job.write_operational(report, out_dir, client),
+        deck=lambda report, out_dir, client, citations, confidence, options: replace(
+            launch_readiness_job.build_deck(report, client=client, citations=tuple(citations),
+                                            confidence=confidence),
+            options=tuple(options),
+        ).write_all(out_dir),
+        # The verdict IS a set of ranked, executable choices -> surface them as the guided outcome.
+        options=tool_options.launch_readiness_options,
     )
 
 
@@ -2258,4 +2308,5 @@ def build_default_registry() -> ToolRegistry:
     reg.register(vehicle_routing_tool())
     reg.register(price_intelligence_tool())
     reg.register(price_watch_tool())
+    reg.register(launch_readiness_tool())
     return reg

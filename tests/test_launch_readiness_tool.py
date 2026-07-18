@@ -74,7 +74,8 @@ def test_end_to_end_orchestrator_run(tmp_path):
                   "daily_demand": [10, 10], "lead_time_days": [7, 14]}).to_csv(inv, index=False)
     orch = Orchestrator(tools.build_default_registry(), llm.RulesFallback(), clients_root=None)
     res = orch.run("launch readiness for the marketing campaign launch dates", data_path=str(camp),
-                   job_type="launch_readiness", params={"inventory_path": str(inv), "as_of_date": "2026-07-01"},
+                   job_type="launch_readiness",
+                   overrides={"inventory_path": str(inv), "as_of_date": "2026-07-01"},
                    out_dir=str(tmp_path / "out"))
     assert res.status == "ok"
     assert res.guided is not None and res.guided.status == "escalated"  # b is red
