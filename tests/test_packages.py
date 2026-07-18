@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from examples.run_package import DEMO_PARAMS, build_demo_intake
+from jobs.inventory_optimization import JobReport, SkuRecommendation
 from scm_agent.package_specs import (
     DIAGNOSTICO,
     GROWTH,
@@ -20,10 +21,11 @@ from scm_agent.package_specs import (
     RETAINER_EJECUTIVO,
     SCALE,
     STARTER,
+    _optimized_targets_from_inventory,
     get_package,
 )
-from scm_agent.packages import missing_required_inputs, run_package
-from scm_agent.registry import ToolRegistry
+from scm_agent.packages import PackageSpec, PackageStep, missing_required_inputs, run_package
+from scm_agent.registry import Prepared, Produced, Tool, ToolRegistry
 from scm_agent.tools import build_default_registry
 from src import client_profile
 from src.deliverable import Branding
@@ -135,9 +137,179 @@ def test_derive_steps_follow_their_source():
             seen.add(step.tool_key)
 
 
+def test_excel_replenishment_follows_inventory_optimization():
+    """_optimized_targets_from_inventory depends on inventory_optimization's
+    report already being in `reports` when excel_replenishment's derive_params
+    runs - a future reshuffle of _STARTER_STEPS must not silently break that."""
+    for spec in PACKAGES.values():
+        keys = spec.tool_keys()
+        if "inventory_optimization" in keys and "excel_replenishment" in keys:
+            assert keys.index("inventory_optimization") < keys.index("excel_replenishment"), spec.key
+
+
 def test_get_package_unknown_key():
     with pytest.raises(KeyError):
         get_package("no-such-package")
+
+
+# ---- derive_params mechanism: report-sourced params, the sibling of derive
+# (report -> input file) and params_from_input (file -> params) --------------------
+
+def _fake_tool(key: str, run_report) -> Tool:
+    """A minimal registrable Tool whose run() echoes back the params it
+    received (as the report), so a test can assert on what actually reached
+    it after every PackageStep augmenter ran."""
+    return Tool(
+        key=key, title=key, description="test double", intent_keywords=(),
+        requires_data=False,
+        prepare=lambda request, provider: Prepared(status="ok", payload=None),
+        run=lambda payload, params: Produced(report=run_report(params), summary="ok"),
+        qa=lambda report: [],
+        deliver=lambda report, out_dir, client: {},
+    )
+
+
+def _synthetic_registry(*tools: Tool) -> ToolRegistry:
+    reg = ToolRegistry()
+    for t in tools:
+        reg.register(t)
+    return reg
+
+
+def _run_synthetic(spec: PackageSpec, registry: ToolRegistry, **kwargs):
+    kwargs.setdefault("params", {})
+    kwargs.setdefault("knowledge", _NoKnowledge())
+    kwargs.setdefault("clients_root", None)
+    return run_package(spec, None, registry=registry, **kwargs)
+
+
+def test_derive_params_merges_report_derived_params():
+    registry = _synthetic_registry(
+        _fake_tool("fake_source", lambda params: {"value": 42}),
+        _fake_tool("fake_sink", lambda params: dict(params)),
+    )
+    spec = PackageSpec(
+        key="synthetic", title="Synthetic", price="n/a", cadence="n/a", audience="n/a",
+        inputs=(),
+        steps=(
+            PackageStep("fake_source", None),
+            PackageStep("fake_sink", None,
+                       derive_params=lambda reports: {"injected": reports["fake_source"]["value"]}),
+        ),
+    )
+    result = _run_synthetic(spec, registry)
+    sink_outcome = next(s for s in result.steps if s.tool_key == "fake_sink")
+    assert sink_outcome.status == "ok"
+    assert sink_outcome.report["injected"] == 42
+
+
+def test_derive_params_empty_dict_is_noop():
+    registry = _synthetic_registry(_fake_tool("fake_sink", lambda params: dict(params)))
+    spec = PackageSpec(
+        key="synthetic", title="Synthetic", price="n/a", cadence="n/a", audience="n/a",
+        inputs=(),
+        steps=(PackageStep("fake_sink", None, derive_params=lambda reports: {}),),
+    )
+    result = _run_synthetic(spec, registry, params={"caller_key": "unchanged"})
+    outcome = result.steps[0]
+    assert outcome.report == {"caller_key": "unchanged"}
+
+
+def test_derive_params_absent_source_report_degrades():
+    """The source step never ran (not in reports) - a well-behaved derive_params
+    uses .get() and returns {} rather than raising; the sink step still runs on
+    its own params, matching every other optional-input degrade in this runner."""
+    registry = _synthetic_registry(_fake_tool("fake_sink", lambda params: dict(params)))
+    spec = PackageSpec(
+        key="synthetic", title="Synthetic", price="n/a", cadence="n/a", audience="n/a",
+        inputs=(),
+        steps=(PackageStep("fake_sink", None,
+                          derive_params=lambda reports: (
+                              {"from_source": reports["never_ran"]} if "never_ran" in reports else {}
+                          )),),
+    )
+    result = _run_synthetic(spec, registry)
+    outcome = result.steps[0]
+    assert outcome.status == "ok"
+    assert "from_source" not in outcome.report
+
+
+def test_derive_params_exception_marks_step_error():
+    def _boom(reports):
+        raise ValueError("boom")
+    registry = _synthetic_registry(_fake_tool("fake_sink", lambda params: dict(params)))
+    spec = PackageSpec(
+        key="synthetic", title="Synthetic", price="n/a", cadence="n/a", audience="n/a",
+        inputs=(),
+        steps=(PackageStep("fake_sink", None, derive_params=_boom),),
+    )
+    result = _run_synthetic(spec, registry)
+    assert result.status == "error"
+    assert result.steps[-1].messages == ("boom",)
+
+
+def test_derive_params_overwrites_matching_caller_param_key():
+    """Same precedence as the two existing report/file param-augmenters
+    (extra_input_params, params_from_input): the derived value wins, matching
+    _run_step's established "later augmenter overwrites" pattern - there is no
+    legitimate reason a caller pre-sets a key a derive_params is meant to own."""
+    registry = _synthetic_registry(_fake_tool("fake_sink", lambda params: dict(params)))
+    spec = PackageSpec(
+        key="synthetic", title="Synthetic", price="n/a", cadence="n/a", audience="n/a",
+        inputs=(),
+        steps=(PackageStep("fake_sink", None, derive_params=lambda reports: {"key": "derived"}),),
+    )
+    result = _run_synthetic(spec, registry, params={"key": "caller"})
+    assert result.steps[0].report["key"] == "derived"
+
+
+# ---- _optimized_targets_from_inventory: the (s,Q) vs (R,S) derivation itself -----
+
+def _fake_recommendation(product_id, reorder_point, order_quantity=None, order_up_to=None):
+    return SkuRecommendation(
+        product_id=product_id, method="test", intermittent=order_up_to is not None,
+        forecast=0.0, error_std=0.0, bias=0.0, mae=0.0,
+        policy_kind="(R, S)" if order_up_to is not None else "(s, Q)",
+        order_quantity=order_quantity, order_up_to=order_up_to,
+        reorder_point=reorder_point, safety_stock=0.0, z_factor=0.0,
+        service_level=0.95, unit_cost=1.0, lead_periods=1.0,
+        cycle_investment=0.0, ss_investment=0.0, investment=0.0, status="ok",
+    )
+
+
+def _fake_job_report(*recommendations):
+    return JobReport(
+        recommendations=list(recommendations), params={}, requested_investment=0.0,
+        cycle_floor=0.0, final_investment=0.0, safety_stock_scale=1.0,
+        feasible=True, budget=None, n_skus=len(recommendations), n_at_risk=0, n_intermittent=0,
+    )
+
+
+def test_optimized_targets_derives_s_from_r_plus_q_for_sq_policy():
+    """(s,Q) continuous-review policies never populate order_up_to
+    (src/policies.py::continuous_review_sq always returns
+    order_up_to_level=None) - the helper must derive S = R + Q itself."""
+    rec = _fake_recommendation("SKU-001", reorder_point=50.0, order_quantity=30.0, order_up_to=None)
+    targets = _optimized_targets_from_inventory({"inventory_optimization": _fake_job_report(rec)})
+    assert targets["optimized_targets"]["SKU-001"] == {"reorder_point": 50.0, "order_up_to": 80.0}
+
+
+def test_optimized_targets_passes_through_rs_order_up_to():
+    """(R,S) periodic-review policies DO populate order_up_to directly
+    (src/policies.py::periodic_review_rs) - must be used as-is, never re-derived."""
+    rec = _fake_recommendation("SKU-002", reorder_point=40.0, order_quantity=None, order_up_to=90.0)
+    targets = _optimized_targets_from_inventory({"inventory_optimization": _fake_job_report(rec)})
+    assert targets["optimized_targets"]["SKU-002"] == {"reorder_point": 40.0, "order_up_to": 90.0}
+
+
+def test_optimized_targets_empty_when_optimizer_did_not_run():
+    assert _optimized_targets_from_inventory({}) == {}
+
+
+def test_optimized_targets_empty_when_optimizer_produced_no_recommendations():
+    assert _optimized_targets_from_inventory(
+        {"inventory_optimization": _fake_job_report()}
+    ) == {}
 
 
 # ---- intake gating ------------------------------------------------------------
@@ -381,6 +553,63 @@ def test_growth_end_to_end(demo_intake, tmp_path):
     out = tmp_path / "out"
     result = _run(GROWTH, demo_intake, out)
     _assert_delivered(result, out, "growth", 26)
+
+
+def test_starter_threads_optimized_targets_into_replenishment(demo_intake, tmp_path):
+    """The fix this section exists for: excel_replenishment must PREFER the
+    prior inventory_optimization step's fresh (R,S) over the planilla's own
+    stale reorder point/demand column, per SKU, within a package run."""
+    out = tmp_path / "out"
+    result = _run(STARTER, demo_intake, out)
+    excel_step = next(s for s in result.steps if s.tool_key == "excel_replenishment")
+    assert excel_step.status == "ok"
+    # All 6 demo planilla SKUs have matching sales history in the demo ventas.csv.
+    assert excel_step.report.n_optimized == 6
+    assert all(ln.source == "kern_optimized" for ln in excel_step.report.lines)
+
+
+def test_growth_and_scale_inherit_optimized_replenishment(demo_intake, tmp_path):
+    """The wiring lives once on the shared _STARTER_STEPS tuple - GROWTH/SCALE
+    inherit it automatically via _STARTER_STEPS + (...)."""
+    for spec in (GROWTH, SCALE):
+        out = tmp_path / f"out_{spec.key}"
+        result = _run(spec, demo_intake, out)
+        excel_step = next(s for s in result.steps if s.tool_key == "excel_replenishment")
+        assert excel_step.status == "ok", spec.key
+        assert all(ln.source == "kern_optimized" for ln in excel_step.report.lines), spec.key
+
+
+def _demo_planilla_with_unmatched_sku(path):
+    from openpyxl import Workbook
+
+    from examples.run_package import _SKUS
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Reposicion"
+    ws.append(["SKU", "Stock Actual", "Demanda Semanal", "Pedido"])
+    for i, sku in enumerate(_SKUS):
+        ws.append([sku, 40 + 30 * i, 35 + 20 * i, ""])
+    ws.append(["SKU-999", 10, 5, ""])  # no sales history -> optimizer has nothing for it
+    wb.save(path)
+
+
+def test_replenishment_degrades_when_optimizer_sku_missing(demo_intake, tmp_path):
+    """Partial coverage - a planilla SKU with no sales history - must fall back
+    to the client's own column for THAT line only, never block the package."""
+    partial = tmp_path / "partial"
+    partial.mkdir()
+    for name in ("ventas.csv", "maestro.csv"):
+        (partial / name).write_bytes((demo_intake / name).read_bytes())
+    _demo_planilla_with_unmatched_sku(partial / "planilla.xlsx")
+    out = tmp_path / "out"
+    result = _run(STARTER, partial, out)
+    assert result.status == "ok"
+    excel_step = next(s for s in result.steps if s.tool_key == "excel_replenishment")
+    assert excel_step.status == "ok"
+    lines_by_sku = {ln.sku: ln for ln in excel_step.report.lines}
+    assert lines_by_sku["SKU-001"].source == "kern_optimized"
+    assert lines_by_sku["SKU-999"].source == "client_sheet"
+    assert excel_step.report.n_optimized == 6  # the 6 demo SKUs, not SKU-999
 
 
 def test_whatif_fallback_template_runs_and_is_flagged(demo_intake, tmp_path):

@@ -125,6 +125,15 @@ class PackageStep:
     # param is simply omitted (never a hard error) when that slot's file is
     # absent, matching every other optional-input degrade in this runner.
     extra_input_params: dict[str, str] = field(default_factory=dict)
+    # The report-sourced sibling of params_from_input (which sources params
+    # from a FILE): given the reports of every step that already ran (dict
+    # tool_key -> report), returns params overrides to merge in before
+    # tool.prepare/run - e.g. excel_replenishment preferring a prior
+    # inventory_optimization step's fresh (R,S) policy over the client's own
+    # sheet column (see package_specs.py::_optimized_targets_from_inventory).
+    # Return {} when the source step didn't run or has nothing to contribute -
+    # the step then degrades to its file-only behavior, never a hard error.
+    derive_params: Callable[[dict[str, object]], dict] | None = None
 
 
 @dataclass(frozen=True)
@@ -386,6 +395,12 @@ def _run_step(
         candidate = (intake / slot.filename) if intake is not None else None
         if candidate is not None and candidate.exists():
             params = {**params, param_key: str(candidate)}
+
+    if step.derive_params is not None:
+        try:
+            params = {**params, **step.derive_params(reports)}
+        except Exception as exc:  # mirror params_from_input's fail-loud contract below
+            return StepOutcome(**base, status=STATUS_ERROR, messages=(str(exc),))
 
     if step.params_from_input is not None and data_path is not None:
         try:

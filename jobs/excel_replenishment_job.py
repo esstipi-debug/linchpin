@@ -33,6 +33,7 @@ Safety-of-plan properties (each earned by an adversarial-review finding):
 from __future__ import annotations
 
 import hashlib
+import re
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
@@ -94,6 +95,26 @@ def _num(value: object) -> float | None:
     return None
 
 
+_INTEGER_FLOAT = re.compile(r"^\d+\.0$")
+
+
+def _match_key(sku: object) -> str:
+    """Normalize a SKU for cross-source matching against an optimizer's
+    product_id keys: str + strip + casefold (ventas.csv and planilla.xlsx are
+    two independently client-authored files - "sku-001" vs "SKU-001" is a
+    plausible real mismatch, not a hypothetical one), folding a numeric-looking
+    '1001.0' (openpyxl's float read-back of an integer-formatted cell, or
+    pandas upcasting an int product_id column to float64 when any other row is
+    blank) down to '1001'. Applied identically to both sides of the lookup so
+    the exact source format never matters. A miss here only ever degrades to
+    today's client_sheet behavior for that one line (see run()) - never a
+    crash or a mispriced order."""
+    text = str(sku).strip().casefold()
+    if _INTEGER_FLOAT.match(text):
+        text = text[:-2]
+    return text
+
+
 @dataclass(frozen=True)
 class PlanillaRow:
     row: int
@@ -110,6 +131,16 @@ class ReplenishmentLine:
     on_hand: float
     target: float
     restock_qty: float
+    # "kern_optimized" when this line's target came from a prior
+    # inventory_optimization step's fresh (R,S) policy; "client_sheet" when it
+    # came from the planilla's own reorder-point/demand column (today's only
+    # behavior, still the default). Per-line, never blended silently - a
+    # client must be able to tell which number drove which line.
+    source: str = "client_sheet"
+    # The reorder trigger actually used: Kern's optimized reorder_point when
+    # source=="kern_optimized"; the client's own ROP in reorder-point mode;
+    # None in demand-cover mode (no trigger concept there today).
+    trigger: float | None = None
 
 
 @dataclass(frozen=True)
@@ -129,6 +160,7 @@ class ExcelReplenishmentReport:
     changeset: writeback.Changeset | None
     outcome: GuidedOutcome
     summary: str
+    n_optimized: int = 0      # lines whose target came from Kern's optimized policy
 
 
 def _scan_sheet(ws, wanted: dict[str, tuple[str, ...]]) -> tuple[int, dict[str, str]] | None:
@@ -348,6 +380,8 @@ def run(
     order_up_to_factor: float = 2.0,
     idempotency_key: str | None = None,
     financial_threshold: float = 50_000.0,
+    optimized_targets: dict[str, dict] | None = None,
+    prefer_optimized_policy: bool = True,
 ) -> ExcelReplenishmentReport:
     """Plan the restock and stage the write-back as a dry-run changeset.
 
@@ -358,30 +392,66 @@ def run(
     ``financial_threshold`` gates the options outcome on the restock's estimated
     $ value, when the planilla carries a cost column (see ``_build_outcome``) -
     without one, the value stays unknown and the check never guesses.
+
+    ``optimized_targets`` is ``{sku: {"reorder_point": R, "order_up_to": S|None}}``
+    - a prior ``inventory_optimization`` step's fresh per-SKU policy (wired by
+    ``scm_agent/package_specs.py::_optimized_targets_from_inventory`` within a
+    package run; standalone callers never pass this, so their behavior is
+    byte-identical to before this param existed). When a SKU has an entry here
+    AND ``prefer_optimized_policy`` is true (the default), Kern's own R/S
+    REPLACES the planilla's stale reorder-point/demand-cover math for that SKU
+    - in BOTH planilla modes, since a SKU under Kern's policy is genuinely
+    managed by min/max regardless of which column the client's sheet happens to
+    have. A SKU absent from ``optimized_targets`` (no sales history to compute
+    a policy for it) degrades to today's exact client-column behavior - never
+    silently, always labeled per-line (``ReplenishmentLine.source``) and
+    surfaced in the deck when coverage is partial (see ``build_deck``).
+
+    Known limitation, not solved here: quantities are computed from ``on_hand``
+    only - open purchase orders already in transit have no input path anywhere
+    in this package, so a client with POs inbound may be told to over-order.
+    Surfaced as a residual note in ``build_deck``, not silently absorbed.
     """
     if cover_periods <= 0 or order_up_to_factor <= 0:
         raise ValueError("cover_periods and order_up_to_factor must be > 0")
     mode: str = payload["mode"]
     cost_by_sku: dict[str, float] = {r.sku: r.cost for r in payload["rows"] if r.cost is not None}
+    optimized_by_key = (
+        {_match_key(sku): target for sku, target in optimized_targets.items()}
+        if optimized_targets and prefer_optimized_policy else {}
+    )
     lines: list[ReplenishmentLine] = []
     restock: dict[str, tuple[int, float]] = {}  # sku -> (sheet row, qty)
     n_unplanned = 0
+    n_optimized = 0
     for row in payload["rows"]:
+        optimized = optimized_by_key.get(_match_key(row.sku))
+        if optimized is not None:
+            reorder_point = optimized["reorder_point"]
+            order_up_to = optimized["order_up_to"]
+            target = order_up_to if order_up_to is not None else reorder_point * order_up_to_factor
+            qty = max(0.0, round(target - row.on_hand, 1)) if row.on_hand < reorder_point else 0.0
+            lines.append(ReplenishmentLine(row.sku, row.on_hand, target, qty,
+                                           source="kern_optimized", trigger=reorder_point))
+            n_optimized += 1
         # A blank planning signal must never coalesce to 0 (that would silently
         # never replenish - or, with negative stock, order against a ROP of 0).
-        if mode == "demand-cover":
+        elif mode == "demand-cover":
             if row.demand_per_period is None:
                 n_unplanned += 1
                 continue
             target = row.demand_per_period * cover_periods
             qty = max(0.0, round(target - row.on_hand, 1))
+            lines.append(ReplenishmentLine(row.sku, row.on_hand, target, qty,
+                                           source="client_sheet", trigger=None))
         else:
             if row.reorder_point is None:
                 n_unplanned += 1
                 continue
             target = row.reorder_point * order_up_to_factor
             qty = max(0.0, round(target - row.on_hand, 1)) if row.on_hand < row.reorder_point else 0.0
-        lines.append(ReplenishmentLine(row.sku, row.on_hand, target, qty))
+            lines.append(ReplenishmentLine(row.sku, row.on_hand, target, qty,
+                                           source="client_sheet", trigger=row.reorder_point))
         if qty > 0:
             restock[row.sku] = (row.row, qty)
 
@@ -451,6 +521,7 @@ def run(
             restock_value=restock_value, financial_threshold=financial_threshold,
         ),
         summary=summary,
+        n_optimized=n_optimized,
     )
 
 
@@ -468,6 +539,8 @@ def verify(report: ExcelReplenishmentReport) -> list[str]:
         issues.append("restock planned but no changeset was staged")
     if not report.restock and report.changeset is not None:
         issues.append("a changeset was staged with nothing to restock")
+    if any(ln.source not in ("kern_optimized", "client_sheet") for ln in report.lines):
+        issues.append("a replenishment line has an unrecognized target source")
     return issues
 
 
@@ -517,6 +590,8 @@ def write_operational(report: ExcelReplenishmentReport, out_dir: str | Path,
             "on_hand": round(ln.on_hand, 2),
             "target": round(ln.target, 2),
             "restock_qty": round(ln.restock_qty, 2),
+            "target_source": ln.source,
+            "reorder_point_used": round(ln.trigger, 2) if ln.trigger is not None else None,
         }
         for ln in report.lines
     ]
@@ -583,6 +658,18 @@ def build_deck(
                 impact=f"fill the {signal}/stock cells so every SKU is protected",
             )
         )
+    if 0 < report.n_optimized < report.n_skus:
+        # Partial coverage must be named, never silently blended into one number -
+        # a client needs to know which lines used Kern's fresh policy vs. their
+        # own sheet's stale reorder point.
+        findings.append(
+            Finding(
+                f"{report.n_skus - report.n_optimized} SKU(s) used the sheet's own reorder point",
+                "No recent sales history to compute Kern's optimized policy for these SKUs, "
+                "so they fell back to the number already on the planilla.",
+                impact="add sales history for these SKUs so Kern can compute a fresh target too",
+            )
+        )
     kpis = (
         Kpi("SKUs planned", str(report.n_skus), rationale=f"From {report.filename}"),
         Kpi("SKUs to replenish", str(report.n_restock), target="0", rationale="Below target"),
@@ -592,6 +679,10 @@ def build_deck(
             f"{report.cover_periods:.0f} periods of demand" if report.mode == "demand-cover"
             else f"{report.order_up_to_factor:.1f} x reorder point",
             rationale="How the target was set",
+        ),
+        Kpi(
+            "Optimized coverage", f"{report.n_optimized}/{report.n_skus}",
+            rationale="SKUs using Kern's freshly computed policy vs. the sheet's own number",
         ),
     )
     data_sources = (
@@ -617,6 +708,7 @@ def build_deck(
                  + "Applying the staged order quantities writes to the client's file through the "
                    "Excel connector's safe-staging plane (drift check - covering the plan's inputs "
                    "via guard cells - backup, atomic write, rollback); a human approves before "
-                   "anything is committed.",
+                   "anything is committed. Quantities assume no purchase orders already in "
+                   "transit - subtract any open POs manually before approving.",
         prepared=prepared,
     )

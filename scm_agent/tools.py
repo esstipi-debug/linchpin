@@ -1348,6 +1348,8 @@ def _excel_replenishment_run(payload: object, params: dict) -> Produced:
         order_up_to_factor=params.get("order_up_to_factor", 2.0),
         idempotency_key=params.get("idempotency_key", "excel-replenish-1"),
         financial_threshold=params.get("financial_threshold", 50_000.0),
+        optimized_targets=params.get("optimized_targets"),
+        prefer_optimized_policy=params.get("prefer_optimized_policy", True),
     )
     return Produced(report=report, summary=report.summary)
 
