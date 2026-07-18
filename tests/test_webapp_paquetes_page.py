@@ -92,15 +92,16 @@ def test_offer_page_cta_uses_stripe_link_when_configured(monkeypatch) -> None:
 
 
 def test_index_shows_band_picker_widget_on_gmv_band_offers() -> None:
-    """Starter/Growth/Scale/Retainer have GMV-band pricing (webapp/pricing_quote.py)
+    """Starter/Growth/Scale have GMV-band pricing (webapp/pricing_quote.py)
     -- their cards get an additive band-picker widget keyed to the API's
-    package_key vocabulary (starter/growth/scale/retainer)."""
+    package_key vocabulary (starter/growth/scale). Retainer is deliberately
+    excluded (see test_index_omits_band_picker_widget_on_non_gmv_band_offers):
+    it is flat/unbanded and upgrade-only, not sold cold off a revenue figure."""
     html = render_index_html(OFFERS, _PROFILE)
     gmv_band = {
         "starter-fundamentos": "starter",
         "growth-operacion": "growth",
         "scale-red-sop": "scale",
-        "retainer-ejecutivo": "retainer",
     }
     for slug, package_key in gmv_band.items():
         assert f'data-slug="{slug}"' in html
@@ -110,8 +111,11 @@ def test_index_shows_band_picker_widget_on_gmv_band_offers() -> None:
 
 
 def test_index_omits_band_picker_widget_on_non_gmv_band_offers() -> None:
-    """diagnostico/starter_latam/proyecto_*/liquidacion have no GMV-band pricing --
-    /api/pricing-quote 400s for them, so they must NOT get the widget."""
+    """diagnostico/starter_latam/proyecto_*/liquidacion/retainer have no GMV-band
+    pricing -- /api/pricing-quote 400s for them, so they must NOT get the widget.
+    Retainer is flat ($4,500/mo, UNBANDED in src/commercial_pricing.py) and
+    upgrade-only (never sold cold), so a "calculate by revenue" widget on its
+    card would be misleading even though it keeps its static price display."""
     html = render_index_html(OFFERS, _PROFILE)
     non_gmv_band_slugs = (
         "diagnostico-arranque",
@@ -120,6 +124,7 @@ def test_index_omits_band_picker_widget_on_non_gmv_band_offers() -> None:
         "proyecto-sourcing",
         "sprint-liquidacion",
         "diagnostico-posicion-precios",
+        "retainer-ejecutivo",
     )
     for slug in non_gmv_band_slugs:
         assert f'data-slug="{slug}"' not in html

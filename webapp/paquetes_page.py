@@ -122,15 +122,18 @@ _FOOT = """
 
 # Offers with real GMV-band pricing behind GET /api/pricing-quote (Task 3,
 # webapp/pricing_quote.py) -> the package_key that endpoint's
-# _PACKAGE_KEY_ALIASES accepts. Only these four get the band-picker widget --
+# _PACKAGE_KEY_ALIASES accepts. Only these three get the band-picker widget --
 # Diagnostico/Starter-LatAm/Proyecto-*/Liquidacion have no GMV band at all and
 # the endpoint 400s for them, so adding the widget there would just surface a
-# broken calculator.
+# broken calculator. Retainer is ALSO excluded: src/commercial_pricing.py gives
+# it no RevenueBand at all (flat $4,500/mo, UNBANDED) -- it is upgrade-only for
+# an existing Scale client, never sold cold off a revenue figure, so a
+# "calculate your price by revenue" widget on its card would be misleading. It
+# keeps its existing static price display, just without the picker.
 _GMV_BAND_PACKAGE_KEYS: dict[str, str] = {
     "starter-fundamentos": "starter",
     "growth-operacion": "growth",
     "scale-red-sop": "scale",
-    "retainer-ejecutivo": "retainer",
 }
 
 

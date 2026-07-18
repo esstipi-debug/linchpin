@@ -30,7 +30,11 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from webapp.app import app  # noqa: E402
 from webapp.offers import get_offer  # noqa: E402
-from webapp.one_plan_page import H1_PROMISE_B  # noqa: E402
+from webapp.one_plan_page import (  # noqa: E402
+    H1_PROMISE_B,
+    _DIAGNOSTICO_PRICE_EN,
+    _STARTER_PRICE_EN,
+)
 
 client = TestClient(app)
 
@@ -93,10 +97,53 @@ def test_page_reuses_the_two_real_offers_and_invents_no_pricing() -> None:
     assert starter is not None and diagnostico is not None
     assert starter.slug in body
     assert diagnostico.slug in body
-    # The authoritative price strings from webapp/offers.py appear verbatim --
-    # no new price point is authored on this page.
-    assert starter.price in body
-    assert diagnostico.price in body
+    # This English page shows its own English/US-formatted price strings (see
+    # test_one_plan_page_prices_are_english_not_spanish below) rather than the
+    # raw Spanish-language, European-decimal Offer.price -- but those strings
+    # restate the SAME real figures from webapp/offers.py, never a new price.
+    assert _DIAGNOSTICO_PRICE_EN in body
+    assert _STARTER_PRICE_EN in body
+    assert "1.500-2.500" in diagnostico.price and "1,500-2,500" in _DIAGNOSTICO_PRICE_EN
+    assert "900" in starter.price and "900" in _STARTER_PRICE_EN
+    assert "40" in starter.price and "40" in _STARTER_PRICE_EN
+    assert "500" in starter.price and "500" in _STARTER_PRICE_EN  # floor SKUs
+    assert "250" in starter.price and "250" in _STARTER_PRICE_EN  # block size
+    assert "1.500" in starter.price and "1,500" in _STARTER_PRICE_EN  # ceiling
+
+
+_SPANISH_PRICE_MARKERS: tuple[str, ...] = ("unico", "piso", "techo", "bloque")
+
+
+def test_one_plan_page_prices_are_english_not_spanish() -> None:
+    """Finding 1 (final whole-branch review): webapp/one_plan_page.py used to
+    render the raw shared Offer.price strings verbatim -- Spanish-language,
+    USD-denominated, European-decimal-formatted (e.g. "USD 900/mes (piso ~500
+    SKUs, +$40/mes cada bloque de 250 SKUs, techo $1.500)"). That is wrong on
+    an English page regardless of any currency debate. The page must show its
+    own English/US-formatted price + cadence strings (see module docstring)
+    and must never leak the raw Spanish price/cadence vocabulary."""
+    body = client.get("/one-plan").text
+    body_lower = body.lower()
+    for marker in _SPANISH_PRICE_MARKERS:
+        assert marker not in body_lower, f"Spanish price marker {marker!r} leaked into /one-plan"
+    # "mes" is checked case-SENSITIVELY (not against body_lower like the other
+    # markers): the page legitimately contains "MES" (Manufacturing Execution
+    # System, e.g. "your ERP/MES executes"), always uppercase. Spanish "mes"
+    # (month) would only ever render lowercase, so a case-sensitive standalone
+    # word check catches the real leak without false-positiving on the acronym.
+    assert re.search(r"\bmes\b", body) is None, "Spanish 'mes' leaked into /one-plan"
+    assert _DIAGNOSTICO_PRICE_EN in body
+    assert _STARTER_PRICE_EN in body
+
+
+def test_one_plan_page_discloses_usd_billing() -> None:
+    """Resolves the plan-level tension (Asset 1's USD-salary comparison vs.
+    Decision 5's "never print USD" rule) pragmatically: keep USD (the
+    product's real Stripe payment links are USD-only; there is no AUD/NZD
+    billing infrastructure), but say so honestly instead of silently implying
+    AUD/NZD."""
+    body = client.get("/one-plan").text
+    assert "Priced and billed in USD via Stripe." in body
 
 
 def test_economics_framed_against_a_full_time_hire_not_the_stale_ratio() -> None:

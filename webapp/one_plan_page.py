@@ -70,6 +70,27 @@ _STARTER_ANNUAL_USD = _STARTER_MONTHLY_USD * 12  # ~10,800
 _PLANNER_LOADED_LOW_USD = 100  # in thousands/yr
 _PLANNER_LOADED_HIGH_USD = 120  # in thousands/yr
 
+# --- English/US-formatted price + cadence display, page-local only ---------
+# webapp/offers.py's Offer.price/cadence are Spanish-language, European-
+# decimal-formatted strings (e.g. "USD 1.500-2.500 unico"). That module stays
+# untouched -- it is the Spanish canonical catalog, used correctly by
+# webapp/paquetes_page.py. This page is English-only, so it restates the SAME
+# real numbers already in Offer.price/Offer.cadence for just the two offers
+# used here, translated into English/US-decimal formatting. No new figures.
+#
+#   diagnostico-arranque.price   == "USD 1.500-2.500 unico"
+#   diagnostico-arranque.cadence == "Unico, sprint de 2 semanas"
+#   starter-fundamentos.price    == "USD 900/mes (piso ~500 SKUs, +$40/mes
+#                                     cada bloque de 250 SKUs, techo $1.500)"
+#   starter-fundamentos.cadence  == "Mensual, alcance variable por catalogo"
+_DIAGNOSTICO_PRICE_EN = "USD 1,500-2,500, one-time"
+_DIAGNOSTICO_CADENCE_EN = "One-time, 2-week sprint"
+_STARTER_PRICE_EN = (
+    "USD 900/month (from ~500 SKUs, plus USD 40/month per extra 250-SKU "
+    "block, capped at USD 1,500/month)"
+)
+_STARTER_CADENCE_EN = "Monthly, scope varies by catalog size"
+
 _HEAD = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -145,7 +166,7 @@ _HEAD = """<!DOCTYPE html>
 """
 
 _FOOT = """
-<footer><div class="wrap">Kern is an independent supply-chain planning tool for AU/NZ inventory-heavy retailers and distributors. Kern plans, coordinates and recommends; your ERP/MES executes and a human approves every change. Serving Australia and New Zealand.</div></footer>
+<footer><div class="wrap">Kern is an independent supply-chain planning team for AU/NZ inventory-heavy retailers and distributors. Kern plans, coordinates and recommends; your ERP/MES executes and a human approves every change. Serving Australia and New Zealand.</div></footer>
 </main>
 </body>
 </html>
@@ -298,7 +319,7 @@ def render_one_plan_html(offer_starter: Offer, offer_diagnostico: Offer) -> str:
   <h2 style="margin-top:10px">Pick based on how much certainty you want first</h2>
   <div class="panel" style="margin-top:16px">
     <h3>{escape(offer_diagnostico.name)}</h3>
-    <p class="sub" style="margin:6px 0 14px">{escape(offer_diagnostico.price)} &middot; {escape(offer_diagnostico.cadence)}
+    <p class="sub" style="margin:6px 0 14px">{escape(_DIAGNOSTICO_PRICE_EN)} &middot; {escape(_DIAGNOSTICO_CADENCE_EN)}
       &mdash; the lowest-commitment way to see what Kern finds in your own data before
       committing to anything ongoing.
       <a href="/paquetes/{escape(offer_diagnostico.slug)}">Full details &rarr;</a></p>
@@ -306,12 +327,13 @@ def render_one_plan_html(offer_starter: Offer, offer_diagnostico: Offer) -> str:
   </div>
   <div class="panel" style="margin-top:14px">
     <h3>{escape(offer_starter.name)}</h3>
-    <p class="sub" style="margin:6px 0 14px">{escape(offer_starter.price)} &middot; {escape(offer_starter.cadence)}
+    <p class="sub" style="margin:6px 0 14px">{escape(_STARTER_PRICE_EN)} &middot; {escape(_STARTER_CADENCE_EN)}
       &mdash; the ongoing engagement: demand, stock, purchasing and pricing worked as one
       plan every cycle, with what-if scenario testing.
       <a href="/paquetes/{escape(offer_starter.slug)}">Full details &rarr;</a></p>
     <div class="row">{_cta_buttons(offer_starter)}</div>
   </div>
+  <p class="sub" style="margin-top:10px;font-size:13px">Priced and billed in USD via Stripe.</p>
   <p class="sub" style="margin-top:16px">
     Not ready for either? Run the <a href="{demo_scan_href}">free self-serve scan</a> on
     your own data first &mdash; no commitment, no card required.
