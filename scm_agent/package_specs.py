@@ -213,6 +213,28 @@ def _cycle_count_from_abc(reports: dict[str, object]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _optimized_targets_from_inventory(reports: dict[str, object]) -> dict:
+    """Thread inventory_optimization's per-SKU (R,S) into excel_replenishment as
+    the preferred target - closes the gap where the two tools used to run as
+    fully independent steps (the optimizer computed a fresh policy nobody ever
+    read; the replenishment plan used the client's stale sheet number). Degrades
+    to {} (today's client-column behavior) when the optimizer did not run in
+    this package context or produced no recommendations, so a standalone
+    excel_replenishment run is never affected - see PackageStep.derive_params."""
+    report = reports.get("inventory_optimization")
+    if report is None or not getattr(report, "recommendations", None):
+        return {}
+    targets: dict[str, dict] = {}
+    for rec in report.recommendations:
+        order_up_to = rec.order_up_to
+        if order_up_to is None and rec.order_quantity is not None:
+            order_up_to = rec.reorder_point + rec.order_quantity  # (s,Q): order up to s+Q
+        targets[str(rec.product_id).strip()] = {
+            "reorder_point": rec.reorder_point, "order_up_to": order_up_to,
+        }
+    return {"optimized_targets": targets}
+
+
 def _default_whatif_drivers() -> pd.DataFrame:
     """Standard sensitivity template (personalize via supuestos.csv when possible)."""
     rows = [
@@ -301,7 +323,7 @@ _STARTER_STEPS = (
     PackageStep("whatif", "supuestos", fallback=_default_whatif_drivers,
                 fallback_note="rangos estandar +/-20%; personalizar supuestos.csv"),
     PackageStep("newsvendor", "estacional", required=False, cadence="por temporada"),
-    PackageStep("excel_replenishment", "planilla"),
+    PackageStep("excel_replenishment", "planilla", derive_params=_optimized_targets_from_inventory),
     PackageStep("cycle_count", None, derive=_cycle_count_from_abc),
     # Moved down from Growth 2026-07-18 - "universal" tools that apply to any
     # business regardless of size/structure. pricing keeps required=True (see

@@ -8,6 +8,7 @@ executable options. Nothing is ever written without an approval + apply.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -286,6 +287,23 @@ def test_escalated_run_still_reaches_the_orchestrator_deck_with_visible_options(
     assert "## Options to act" in md             # the options actually rendered, not just returned
 
 
+def test_standalone_orchestrator_run_never_uses_optimized_targets(planilla, tmp_path):
+    """A tool run through the orchestrator (not a package) has no derive_params
+    mechanism upstream of it - optimized_targets can only ever be None here, so
+    the run must be byte-identical to a plain job.run() call. Proves the
+    no-regression guarantee at the real caller seam, not just the job's own
+    default argument. JobResult exposes no raw report object, so this reads
+    the operational CSV deliverable - the same file a real caller would read."""
+    orch = Orchestrator(registry=tools.build_default_registry(), provider=llm.RulesFallback())
+    res = orch.run("excel replenishment: update my excel planilla",
+                   data_path=str(planilla), client="Acme", out_dir=tmp_path / "out")
+    assert res.status == "ok" and res.tool == "excel_replenishment"
+    csv_text = Path(res.deliverables["csv"]).read_text(encoding="utf-8")
+    assert "kern_optimized" not in csv_text
+    assert csv_text.count("client_sheet") == 3  # all 3 demo SKUs
+    assert "58.0" in csv_text and "42.0" in csv_text  # same numbers as always
+
+
 def test_all_above_target_never_escalates_even_with_a_tiny_threshold(tmp_path):
     """Every SKU deeply above its reorder point -> nothing to restock -> no dollar
     value at risk -> must never gate the 'hold' outcome behind finance."""
@@ -510,3 +528,189 @@ def test_build_deck_writes_deliverable(planilla, tmp_path):
     deck = job.build_deck(report, client="Acme", citations=("Vandeput (2020), ch. 2",))
     files = deck.write_all(tmp_path / "deck")
     assert any(p.exists() for p in files.values())
+
+
+# ---- optimized-target override: prefer Kern's fresh (R,S) over the sheet's own ROP ---
+#
+# Wired from scm_agent/package_specs.py's _optimized_targets_from_inventory (a
+# prior inventory_optimization step's report, within the same package run) --
+# see tests/test_packages.py for the package-level wiring/degrade tests. These
+# are job-level: standalone `run()` calls, so the mechanism is provable without
+# spinning up a whole package.
+
+def test_match_key_normalizes_openpyxl_float_skus():
+    assert job._match_key("1001.0") == "1001"
+    assert job._match_key(1001.0) == "1001"
+    assert job._match_key("SKU-001") == "sku-001"
+    assert job._match_key(" 42 ") == "42"
+
+
+def test_match_key_folds_case():
+    # ventas.csv and planilla.xlsx are independently client-authored -> a
+    # casing mismatch between the two is plausible, not hypothetical.
+    assert job._match_key("SKU-001") == job._match_key("sku-001")
+
+
+def test_optimized_target_overrides_client_rop(planilla):
+    payload = job.prepare(str(planilla), {})
+    # Client's own sheet says SKU-002 (stock=130) is above its stale ROP=80 ->
+    # old behavior would NOT restock. Kern's fresh optimized policy says the
+    # real reorder point is higher -> it SHOULD restock, using Kern's numbers.
+    optimized = {"SKU-002": {"reorder_point": 150.0, "order_up_to": 200.0}}
+    report = job.run(payload, optimized_targets=optimized)
+    line = next(ln for ln in report.lines if ln.sku == "SKU-002")
+    assert line.source == "kern_optimized"
+    assert line.trigger == 150.0
+    assert line.target == 200.0
+    assert line.restock_qty == 70.0  # 200 - 130, Kern's target, not the client's
+    assert report.n_optimized == 1
+    assert report.restock["SKU-002"] == 70.0
+
+
+def test_optimized_derives_target_from_factor_when_order_up_to_none(planilla):
+    # (s,Q) policies leave order_up_to unresolved at the job boundary (the R+Q
+    # derivation itself lives in the package helper, tested separately) - the
+    # job must still degrade gracefully to the factor-based target, never crash
+    # or silently produce a None target.
+    payload = job.prepare(str(planilla), {})
+    optimized = {"SKU-001": {"reorder_point": 55.0, "order_up_to": None}}
+    report = job.run(payload, optimized_targets=optimized, order_up_to_factor=3.0)
+    line = next(ln for ln in report.lines if ln.sku == "SKU-001")
+    assert line.source == "kern_optimized"
+    assert line.target == 165.0  # 55 * 3.0
+
+
+def test_sku_absent_from_optimizer_falls_back_to_client_sheet(planilla):
+    payload = job.prepare(str(planilla), {})
+    optimized = {"SKU-001": {"reorder_point": 60.0, "order_up_to": 100.0}}
+    report = job.run(payload, optimized_targets=optimized)
+    line = next(ln for ln in report.lines if ln.sku == "SKU-003")
+    assert line.source == "client_sheet"
+    assert line.trigger == 25.0    # the client's own ROP
+    assert line.target == 50.0     # 25 * order_up_to_factor (default 2.0)
+    assert report.n_optimized == 1  # only SKU-001
+
+
+def test_prefer_optimized_false_ignores_targets(planilla):
+    optimized = {"SKU-001": {"reorder_point": 999.0, "order_up_to": 999.0}}
+    report = job.run(job.prepare(str(planilla), {}),
+                     optimized_targets=optimized, prefer_optimized_policy=False)
+    assert all(ln.source == "client_sheet" for ln in report.lines)
+    assert report.n_optimized == 0
+    baseline = job.run(job.prepare(str(planilla), {}))
+    assert report.restock == baseline.restock
+
+
+def test_run_without_optimized_targets_is_unchanged(planilla):
+    """No-regression guarantee: the numbers must reproduce today's behavior
+    exactly (see test_run_reorder_point_mode_orders_up_to_factor) when the
+    caller passes nothing new."""
+    report = job.run(job.prepare(str(planilla), {}))
+    assert report.restock == {"SKU-001": 58.0, "SKU-003": 42.0}
+    assert all(ln.source == "client_sheet" for ln in report.lines)
+    assert all(ln.trigger == pytest.approx(row_rop) for ln, row_rop in
+               zip(report.lines, (50.0, 80.0, 25.0)))
+    assert report.n_optimized == 0
+
+
+def test_demand_cover_sku_gets_trigger_when_optimized(tmp_path):
+    p = _make_planilla(tmp_path / "d.xlsx", demand_column=True)
+    payload = job.prepare(str(p), {})
+    # SKU-002: stock=130, demand=12/wk. Blind demand-cover (8 periods) targets
+    # 96 < 130 -> qty 0 regardless (today's behavior has no reorder TRIGGER at
+    # all in demand-cover mode). An optimized R above current stock makes
+    # Kern's min/max correctly fire a reorder that blind top-up would miss.
+    optimized = {"SKU-002": {"reorder_point": 150.0, "order_up_to": 200.0}}
+    report = job.run(payload, optimized_targets=optimized)
+    line = next(ln for ln in report.lines if ln.sku == "SKU-002")
+    assert line.source == "kern_optimized"
+    assert line.trigger == 150.0
+    assert line.restock_qty == 70.0  # 200 - 130, triggered because 130 < R=150
+    other = next(ln for ln in report.lines if ln.sku == "SKU-001")
+    assert other.source == "client_sheet"
+    assert other.trigger is None  # demand-cover mode has no trigger concept today
+
+
+def test_numeric_sku_matches_optimizer_key_across_formats(tmp_path):
+    # openpyxl round-trips a whole-number numeric cell back as a clean "1001"
+    # (verified empirically - no ".0"). The realistic mismatch runs the OTHER
+    # direction: pandas upcasts an integer product_id COLUMN to float64 the
+    # moment any other row in that CSV column is blank/NaN, so the optimizer's
+    # key can arrive as "1001.0" even though the planilla's own SKU is clean.
+    wb = Workbook()
+    ws = wb.active
+    ws.title = SHEET
+    ws.append(["Codigo", "Stock", "Punto Reorden"])
+    ws.append([1001, 10, 5])
+    f = tmp_path / "numeric_sku.xlsx"
+    wb.save(f)
+    payload = job.prepare(str(f), {})
+    assert payload["rows"][0].sku == "1001"  # the planilla side is clean
+    optimized = {"1001.0": {"reorder_point": 20.0, "order_up_to": 40.0}}  # pandas float64 key
+    report = job.run(payload, optimized_targets=optimized)
+    assert report.lines[0].source == "kern_optimized"
+
+
+def test_write_operational_has_target_source_and_reorder_point_used(planilla, tmp_path):
+    optimized = {"SKU-001": {"reorder_point": 60.0, "order_up_to": 100.0}}
+    report = job.run(job.prepare(str(planilla), {}), optimized_targets=optimized)
+    written = job.write_operational(report, tmp_path / "out", "Acme")
+    text = written["csv"].read_text(encoding="utf-8")
+    assert "target_source" in text and "reorder_point_used" in text
+    assert "kern_optimized" in text
+
+
+def test_deck_reports_partial_optimized_coverage(planilla):
+    # Only SKU-001 has an optimized policy; SKU-002/003 fall back - partial
+    # coverage must be named in the deck, never silently blended in.
+    optimized = {"SKU-001": {"reorder_point": 60.0, "order_up_to": 100.0}}
+    report = job.run(job.prepare(str(planilla), {}), optimized_targets=optimized)
+    assert report.n_optimized == 1 and report.n_skus == 3
+    md = job.build_deck(report, client="Acme").to_markdown()
+    assert "Optimized coverage" in md
+    assert "1/3" in md
+
+
+def test_deck_omits_coverage_finding_when_fully_optimized(planilla):
+    optimized = {
+        "SKU-001": {"reorder_point": 60.0, "order_up_to": 100.0},
+        "SKU-002": {"reorder_point": 150.0, "order_up_to": 200.0},
+        "SKU-003": {"reorder_point": 30.0, "order_up_to": 60.0},
+    }
+    report = job.run(job.prepare(str(planilla), {}), optimized_targets=optimized)
+    assert report.n_optimized == report.n_skus == 3
+    md = job.build_deck(report, client="Acme").to_markdown()
+    assert "used the sheet's own reorder point" not in md
+
+
+def test_optimized_target_plans_even_when_client_column_is_blank(tmp_path):
+    """Before this diff, a blank ROP/demand cell always hit n_unplanned += 1
+    and could never reach restock/staging (the optimized-check now runs BEFORE
+    that guard). An optimizer match must plan and stage the line anyway - the
+    optimized target doesn't depend on the client's own column at all."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = SHEET
+    ws.append(["Codigo", "Stock", "Punto Reorden"])
+    ws.append(["SKU-001", 10, None])  # blank ROP -> today, always n_unplanned
+    f = tmp_path / "blank_rop_optimized.xlsx"
+    wb.save(f)
+    payload = job.prepare(str(f), {})
+    optimized = {"SKU-001": {"reorder_point": 50.0, "order_up_to": 80.0}}
+    report = job.run(payload, optimized_targets=optimized)
+    assert report.n_unplanned == 0
+    line = report.lines[0]
+    assert line.source == "kern_optimized"
+    assert line.restock_qty == 70.0  # 80 - 10, staged
+    assert report.restock == {"SKU-001": 70.0}
+    assert report.changeset is not None
+    edits = {c.field: c.after for c in report.changeset.changes}
+    assert edits  # non-empty staged changeset - the blank ROP never blocked it
+
+
+def test_verify_rejects_bad_source_label(planilla):
+    report = job.run(job.prepare(str(planilla), {}))
+    bad_line = replace(report.lines[0], source="mystery")
+    bad_report = replace(report, lines=(bad_line,) + report.lines[1:])
+    issues = job.verify(bad_report)
+    assert any("source" in i for i in issues)
