@@ -79,6 +79,7 @@ from webapp.decisions import router as decisions_router  # noqa: E402
 from webapp.mcp_auth import McpKeyAuthMiddleware  # noqa: E402
 from webapp.mcp_server import build_mcp_server  # noqa: E402
 from webapp.offers import OFFERS, get_offer  # noqa: E402
+from webapp.one_plan_page import render_one_plan_html  # noqa: E402
 from webapp.operator_profile import get_operator_profile  # noqa: E402
 from webapp.paquetes_page import render_index_html, render_offer_html  # noqa: E402
 from webapp.pricing_page import render_pricing_html  # noqa: E402
@@ -1615,6 +1616,21 @@ def stocky_alternative_page() -> HTMLResponse:
         "starter-fundamentos/diagnostico-arranque must exist in webapp.offers.OFFERS"
     )
     return HTMLResponse(render_stocky_alternative_html(offer_starter, offer_diagnostico))
+
+
+@app.get("/one-plan")
+def one_plan_page() -> HTMLResponse:
+    """English AU/NZ agency landing page. Positions Kern as a fractional
+    planning team that works demand, stock, purchasing and pricing as a single
+    plan. CTAs into the SAME two real offers the stocky page uses -- no new
+    pricing is authored on the page (see webapp/one_plan_page.py's docstring for
+    the banned-words + fractional-team-economics guardrails)."""
+    offer_starter = get_offer("starter-fundamentos")
+    offer_diagnostico = get_offer("diagnostico-arranque")
+    assert offer_starter is not None and offer_diagnostico is not None, (
+        "starter-fundamentos/diagnostico-arranque must exist in webapp.offers.OFFERS"
+    )
+    return HTMLResponse(render_one_plan_html(offer_starter, offer_diagnostico))
 
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
