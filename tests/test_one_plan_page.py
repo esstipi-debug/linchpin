@@ -31,9 +31,9 @@ from fastapi.testclient import TestClient  # noqa: E402
 from webapp.app import app  # noqa: E402
 from webapp.offers import get_offer  # noqa: E402
 from webapp.one_plan_page import (  # noqa: E402
-    H1_PROMISE_B,
     _DIAGNOSTICO_PRICE_EN,
     _STARTER_PRICE_EN,
+    H1_PROMISE_B,
 )
 
 client = TestClient(app)
