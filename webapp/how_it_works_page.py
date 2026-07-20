@@ -80,7 +80,7 @@ def _donut_svg(
         arcs.append(
             f'<circle class="donut-seg" data-label="{safe_label}" data-count="{escape(str(count))}" '
             f'data-pct="{escape(str(pct))}" tabindex="0" cx="{escape(f"{center:.3f}")}" cy="{escape(f"{center:.3f}")}" r="{escape(f"{radius:.3f}")}" '
-            f'fill="none" stroke="{color}" stroke-width="{escape(str(stroke_width))}" '
+            f'fill="none" stroke="{escape(color)}" stroke-width="{escape(str(stroke_width))}" '
             f'stroke-dasharray="{escape(f"{dash:.3f}")} {escape(f"{gap:.3f}")}" stroke-dashoffset="{escape(f"{offset:.3f}")}" '
             f'transform="rotate(-90 {escape(f"{center:.3f}")} {escape(f"{center:.3f}")})">'
             f"<title>{safe_label}: {escape(str(count))} ({escape(str(pct))}%)</title>"
