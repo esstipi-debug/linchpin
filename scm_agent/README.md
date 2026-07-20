@@ -14,13 +14,13 @@ single `register()` call, no routing edits.
 | Area | Tools |
 |---|---|
 | Demand & classification | `abc_xyz` · `forecast` · `whatif` |
-| Inventory & replenishment | `inventory_optimization` · `newsvendor` · `multi_echelon` · `ddmrp` · `simulation` · `drp` · `odoo_replenishment` · `excel_replenishment` |
+| Inventory & replenishment | `inventory_optimization` · `newsvendor` · `multi_echelon` · `ddmrp` · `simulation` · `digital_twin` · `drp` · `odoo_replenishment` · `excel_replenishment` · `hat_tension` · `hat_settlement` |
 | Inventory control & health | `cycle_count` · `reconciliation` · `excess_obsolete` · `markdown_liquidation` · `fefo` · `data_quality` |
-| Procurement & sourcing | `sourcing` · `landed_cost` · `acceptance_sampling` |
-| Network & logistics | `facility_location` · `transportation` · `vehicle_routing` · `warehouse_layout` · `slotting` · `queuing` · `scheduling` |
-| Pricing & finance | `pricing` · `price_intelligence` · `financial_kpis` · `cost_to_serve` · `learning_curve` |
+| Procurement & sourcing | `sourcing` · `supplier_management` · `landed_cost` · `acceptance_sampling` |
+| Network & logistics | `facility_location` · `network_design` · `transportation` · `vehicle_routing` · `warehouse_layout` · `slotting` · `queuing` · `scheduling` |
+| Pricing & finance | `pricing` · `price_intelligence` · `price_watch` · `financial_kpis` · `cost_to_serve` · `learning_curve` |
 | Returns, risk & benchmarking | `returns` · `risk` · `dea` |
-| Planning cadence & projects | `sop` · `earned_value` |
+| Planning cadence & projects | `sop` · `earned_value` · `launch_readiness` |
 | Leadership | `leadership_chain` |
 
 Three worked examples, one per input/deliverable shape:

@@ -16,7 +16,7 @@ from src.hats import HAT_KEYS, headline_kpi
 
 
 def _print_tension(inp, tmap) -> None:
-    tag = "  (assumed)" if inp.price_breaks_assumed else ""
+    tag = "  tarifario (assumed)" if inp.price_breaks_assumed else ""
     print(f"[{inp.sku}]{tag}")
     for k in HAT_KEYS:
         e = tmap.ideals[k]
