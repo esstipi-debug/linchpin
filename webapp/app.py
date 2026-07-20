@@ -76,6 +76,7 @@ from warehouse.html_export import to_html  # noqa: E402
 from warehouse.qa import validate as validate_layout  # noqa: E402
 from webapp import demo_price_scan, demo_scan, observability, security  # noqa: E402
 from webapp.decisions import router as decisions_router  # noqa: E402
+from webapp.how_it_works_page import render_how_it_works_html  # noqa: E402
 from webapp.mcp_auth import McpKeyAuthMiddleware  # noqa: E402
 from webapp.mcp_server import build_mcp_server  # noqa: E402
 from webapp.offers import OFFERS, get_offer  # noqa: E402
@@ -1631,6 +1632,15 @@ def one_plan_page() -> HTMLResponse:
         "starter-fundamentos/diagnostico-arranque must exist in webapp.offers.OFFERS"
     )
     return HTMLResponse(render_one_plan_html(offer_starter, offer_diagnostico))
+
+
+@app.get("/how-it-works")
+def how_it_works_page() -> HTMLResponse:
+    """Internal/onboarding page explaining how Kern works -- see
+    webapp/how_it_works_page.py's module docstring. Fully static (no request
+    params): every number it shows is curated at write time against the
+    actual code, not computed per-request."""
+    return HTMLResponse(render_how_it_works_html())
 
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

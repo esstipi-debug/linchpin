@@ -146,3 +146,31 @@ def test_page_has_quiet_nav_links() -> None:
 def test_page_loads_the_interactivity_script() -> None:
     html = render_how_it_works_html()
     assert '<script src="/static/how_it_works.js"></script>' in html
+
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+from webapp.app import app  # noqa: E402
+
+client = TestClient(app)
+
+
+def test_how_it_works_route_returns_200_html() -> None:
+    resp = client.get("/how-it-works")
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers["content-type"]
+
+
+def test_how_it_works_route_serves_the_interactivity_script() -> None:
+    resp = client.get("/static/how_it_works.js")
+    assert resp.status_code == 200
+    assert "bindDonutLensTabs" in resp.text
+
+
+def test_how_it_works_route_body_matches_direct_render() -> None:
+    """HTMLResponse must not transform the string in any way -- catches a
+    route-wiring bug (wrong render call, double-escaping, truncation) that
+    the Task 4 direct-render tests can't see since they never go through
+    the HTTP layer."""
+    resp = client.get("/how-it-works")
+    assert resp.text == render_how_it_works_html()
