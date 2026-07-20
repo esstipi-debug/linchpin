@@ -245,6 +245,8 @@ TOOL_TITLES: dict[str, dict[Lang, str]] = {
     "markdown_liquidation": {"es": "Plan de Liquidacion por Descuento", "en": "Markdown Liquidation Plan"},
     "facility_location": {"es": "Ubicacion de Instalaciones (Diseno de Red)",
                            "en": "Facility Location (Network Design)"},
+    "network_design": {"es": "Diseno de Red (Multi-Instalacion p-Mediana)",
+                        "en": "Network Design (Multi-Facility p-Median)"},
     "drp": {"es": "Planificacion de Requerimientos de Distribucion (DRP)",
             "en": "Distribution Requirements Planning (DRP)"},
     "vehicle_routing": {"es": "Ruteo y Programacion de Vehiculos", "en": "Vehicle Routing & Scheduling"},

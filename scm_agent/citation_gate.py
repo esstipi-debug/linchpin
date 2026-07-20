@@ -100,6 +100,7 @@ TOOL_CONCEPTS: dict[str, tuple[str, ...]] = {
     "excess_obsolete": ("obsolescence_cost",),
     "markdown_liquidation": ("markdown_pricing", "obsolescence_cost"),
     "facility_location": ("facility_location", "network_design", "distribution_network_design"),
+    "network_design": ("facility_location", "network_design", "distribution_network_design"),
     "drp": ("vollmann_drp", "distribution_network_design"),
     "vehicle_routing": ("route_sheet", "last_mile_delivery"),
     "price_intelligence": ("price_competition", "competition_oriented_pricing", "price_positioning"),

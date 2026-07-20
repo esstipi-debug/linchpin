@@ -81,3 +81,37 @@ def test_build_deck_is_ascii_deliverable():
     md = deck.to_markdown()
     assert md.isascii()
     assert "Network Design" in md and "## Coverage & handoff" in md
+
+
+def test_brief_routes_to_network_design():
+    reg = tools.build_default_registry()
+    res = intent.classify(
+        "p-median network optimization: how many distribution centers to open and which sites",
+        reg, llm.RulesFallback(),
+    )
+    assert res.job_type == "network_design"
+
+
+def test_facility_location_brief_still_routes_to_facility_location():
+    # guard: the new tool's keywords must not steal single-facility briefs
+    reg = tools.build_default_registry()
+    res = intent.classify(
+        "facility location / network design: center of gravity for the optimal DC location",
+        reg, llm.RulesFallback(),
+    )
+    assert res.job_type == "facility_location"
+
+
+def test_orchestrator_runs_network_design_with_ranked_options(tmp_path):
+    csv = tmp_path / "nodes.csv"
+    _nodes_df().to_csv(csv, index=False)
+    orch = Orchestrator(registry=tools.build_default_registry(), provider=llm.RulesFallback())
+    res = orch.run(
+        "p-median multi-facility: how many dcs to open and which sites",
+        data_path=str(csv), overrides={"p": 2}, client="Acme", out_dir=tmp_path,
+    )
+    assert res.status == "ok" and res.tool == "network_design"
+    assert Path(res.deliverables["deck_report"]).exists()
+    assert Path(res.deliverables["csv"]).exists()
+    assert res.guided is not None and res.guided.status == OPTIONS
+    assert sum(1 for o in res.guided.options if o.recommended) == 1
