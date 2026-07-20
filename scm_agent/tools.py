@@ -32,6 +32,7 @@ from jobs import (
     learning_curve_job,
     markdown_liquidation_job,
     multi_echelon_job,
+    network_design_job,
     newsvendor_job,
     odoo_job,
     price_watch_deliverable,
@@ -1944,6 +1945,58 @@ def facility_location_tool() -> Tool:
     )
 
 
+# ---- network_design (multi-facility p-median MILP) ---------------------------
+
+def _network_design_prepare(request: JobRequest, provider: LLMProvider) -> Prepared:
+    if not request.data_path:
+        return Prepared(
+            status="needs_data",
+            messages=["a network-nodes CSV (x, y + optional name/weight/role/fixed_cost/capacity) "
+                      "and a facility count (params.p) are required"],
+        )
+    try:
+        payload = network_design_job.prepare(request.data_path, request.params)
+    except (ValueError, FileNotFoundError) as exc:
+        return Prepared(status="needs_data", messages=[str(exc)])
+    if not payload["demands"]:
+        return Prepared(status="needs_data", messages=["no demand points found in the data"])
+    if not payload["sites"]:
+        return Prepared(status="needs_data", messages=["no candidate sites found in the data"])
+    return Prepared(status="ok", payload=payload)
+
+
+def _network_design_run(payload: object, params: dict) -> Produced:
+    report = network_design_job.run(payload)
+    return Produced(report=report, summary=report.summary)
+
+
+def network_design_tool() -> Tool:
+    return Tool(
+        key="network_design",
+        title="Network Design (Multi-Facility p-Median)",
+        description="Choose which p of several candidate sites to open and assign each demand point "
+                    "to one, minimizing total weighted travel (with optional fixed costs and "
+                    "capacities), via an exact MILP - the multi-facility counterpart to single-site "
+                    "facility location. Offline, straight-line distance.",
+        intent_keywords=(
+            "p-median", "p median", "multi-facility", "multiple facilities",
+            "how many warehouses", "how many distribution centers", "how many dcs",
+            "number of dcs", "which sites to open", "network optimization",
+            "open facilities", "consolidate distribution centers",
+        ),
+        requires_data=True,
+        options=tool_options.network_design_options,
+        prepare=_network_design_prepare,
+        run=_network_design_run,
+        qa=lambda report: network_design_job.verify(report),
+        deliver=lambda report, out_dir, client: network_design_job.write_operational(report, out_dir, client),
+        deck=lambda report, out_dir, client, citations, confidence, options: replace(
+            network_design_job.build_deck(report, client=client, citations=tuple(citations), confidence=confidence),
+            options=tuple(options),
+        ).write_all(out_dir),
+    )
+
+
 # ---- drp (distribution requirements planning) --------------------------------
 
 def _drp_prepare(request: JobRequest, provider: LLMProvider) -> Prepared:
@@ -2364,6 +2417,7 @@ def build_default_registry() -> ToolRegistry:
     reg.register(excess_obsolete_tool())
     reg.register(markdown_liquidation_tool())
     reg.register(facility_location_tool())
+    reg.register(network_design_tool())
     reg.register(drp_tool())
     reg.register(vehicle_routing_tool())
     reg.register(price_intelligence_tool())
