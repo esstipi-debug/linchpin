@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- **`network_design` — multi-facility p-median network design tool** (`src/network_design.py`, `jobs/network_design_job.py`). Solves which `p` of several candidate sites to open and assigns each demand point to one, minimizing total weighted travel (with optional fixed costs/capacities), via an exact MILP (`scipy.optimize.milp`, HiGHS branch-and-bound) — the multi-facility counterpart to the existing single-site `facility_location` tool (continuous center-of-gravity/Weiszfeld). Reuses `facility_location`'s `DemandPoint`/`Location`/`total_weighted_distance` primitives rather than duplicating them. Reports the weighted-travel saving versus the best single-facility baseline. Part of the CSCP/SCPro gap-closing initiative (raising ASCM/CSCMP reference-doc coverage). 15 tests (engine + job + routing/orchestrator).
 - **`GET /stocky-alternative` — English-language SEO/conversion landing page**
   (`webapp/stocky_alternative_page.py`) for the "stocky alternative" search wave: Shopify
   delisted its native Stocky forecasting/PO app from the App Store in Feb 2026 and shuts it
