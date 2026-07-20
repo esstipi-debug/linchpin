@@ -293,7 +293,7 @@
       return '<div style="display:grid;grid-template-columns:64px 1fr 96px;gap:14px;align-items:center">' +
         '<span style="' + MONO + ';font-size:12px;font-weight:600;color:var(--txt-2)">' + s.id + "</span>" +
         '<div class="bar-track" style="height:18px;display:flex">' +
-        '<div class="bar-fill-gloss bar-fill-shimmer" style="height:100%;width:' + cycleW + '%;background:var(--accent-bar);transition:width .55s cubic-bezier(0.16,1,0.3,1)"></div>' +
+        '<div class="bar-fill-gloss bar-fill-shimmer" style="height:100%;width:' + cycleW + '%;background-color:var(--accent-bar);transition:width .55s cubic-bezier(0.16,1,0.3,1)"></div>' +
         '<div class="bar-fill-gloss bar-fill-safety" style="height:100%;width:' + ssW + '%;transition:width .55s cubic-bezier(0.16,1,0.3,1)"></div></div>' +
         '<span style="' + MONO + ';font-size:12px;text-align:right;color:var(--txt-2)">' + money(inv) + "</span></div>";
     }).join("");
@@ -334,7 +334,7 @@
 
     var right = '<div style="display:flex;flex-direction:column;gap:16px;min-width:0">' + banner +
       '<div style="' + CARD + ';padding:18px 20px;display:flex;flex-direction:column;gap:14px">' +
-      '<span style="font-size:12px;font-weight:600;color:var(--txt-2)">Allocation by SKU — <span style="color:var(--accent)">cycle</span> + <span style="color:var(--accent-bright)">safety</span></span>' +
+      '<span style="font-size:12px;font-weight:600;color:var(--txt-2)">Allocation by SKU — <span style="color:var(--accent)">cycle</span> + <span style="color:var(--accent-warm)">safety</span></span>' +
       bars + "</div></div>";
 
     return '<div class="fade-up" style="display:grid;grid-template-columns:340px minmax(0,1fr);gap:22px;align-items:start">' + aside + right + "</div>";
