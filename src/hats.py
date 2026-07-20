@@ -17,7 +17,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from src.eoq import PriceBreak, compute_eoq, compute_eoq_volume_discount
-from src.safety_stock import safety_stock
+from src.fill_rate import fill_rate_from_safety_stock, normal_loss_standard
+from src.financial_kpis import days_inventory_outstanding
+from src.safety_stock import safety_stock, service_level_factor
 
 HAT_COMPRADOR = "comprador"
 HAT_PLANNER = "planner"
@@ -299,4 +301,233 @@ def candidate_grid(inputs: HatInputs) -> tuple[Candidate, ...]:
     qs.sort()
     return tuple(
         Candidate(order_quantity=q, service_level=sl) for sl in SL_GRID for q in qs
+    )
+
+
+# -- D3: shortage economics ------------------------------------------------------
+
+
+def shortage_cost_per_unit(inputs: HatInputs) -> float:
+    """p_short = precio - c_base with precio = c_base / (1 - gross_margin_rate):
+    a stockout is a lost sale at unit margin (D3). Selling price derives from
+    the BASE unit cost -- purchase discounts do not change the shelf price."""
+    m = inputs.config.gross_margin_rate
+    return inputs.unit_cost * m / (1.0 - m)
+
+
+def _expected_units_short_per_year(inputs: HatInputs, cand: Candidate) -> float:
+    """(D/Q) * sigma_L * L_N(z(SL)); zero when demand has no variability."""
+    sigma_l = sigma_over_lead(inputs)
+    if sigma_l <= 0:
+        return 0.0
+    z = service_level_factor(cand.service_level)
+    cycles = inputs.annual_demand / cand.order_quantity
+    return cycles * sigma_l * float(normal_loss_standard(z))
+
+
+# -- The neutral judge (spec sec 5) -- values, never decides ------------------------
+
+
+def decision_cost(inputs: HatInputs, cand: Candidate) -> float:
+    """C(Q, SL) = D*c(Q) + K*D/Q + h_total*c(Q)*(Q/2 + SS(SL)) + p_short*E[short].
+
+    Honesty note (spec sec 5): minimizing C directly would be a FIFTH policy with
+    implicit weights baked into its coefficients. The hat model exists to make
+    that trade-off explicit and auditable -- the judge only VALUES candidates so
+    tension and settlements can be compared in $; it never picks the plan.
+    """
+    cfg = inputs.config
+    c_q = unit_cost_at(inputs, cand.order_quantity)
+    purchase = inputs.annual_demand * c_q
+    ordering = cfg.order_cost * inputs.annual_demand / cand.order_quantity
+    holding = cfg.holding_rate * c_q * (cand.order_quantity / 2.0 + ss_units(inputs, cand.service_level))
+    shortage = shortage_cost_per_unit(inputs) * _expected_units_short_per_year(inputs, cand)
+    return purchase + ordering + holding + shortage
+
+
+def baseline_plan(inputs: HatInputs) -> Candidate:
+    """What Kern ships today (jobs/inventory_optimization.py): (s,Q) via classic
+    EOQ at holding_rate*unit_cost with cycle service level 0.95 (= sl_target)
+    and a CONSTANT unit cost (no discounts). Pure mirror -- the equivalence
+    against the real job is pinned by tests/test_hats_valuation.py."""
+    cfg = inputs.config
+    q = compute_eoq(
+        inputs.annual_demand, cfg.holding_rate * inputs.unit_cost, cfg.order_cost,
+    ).order_quantity
+    return Candidate(order_quantity=q, service_level=cfg.sl_target)
+
+
+# -- The four utilities (spec sec 4) -- higher is better -----------------------------
+
+
+def _u_comprador(inputs: HatInputs, cand: Candidate) -> float:
+    """-(c(Q) + K/Q): effective unit purchase cost. Flat in SL."""
+    return -(unit_cost_at(inputs, cand.order_quantity)
+             + inputs.config.order_cost / cand.order_quantity)
+
+
+def _u_planner_valid(inputs: HatInputs, cand: Candidate) -> float:
+    """-(K*D/Q + h_total*c(Q)*(Q/2 + SS)) -- only meaningful when SL >= sl_target."""
+    cfg = inputs.config
+    c_q = unit_cost_at(inputs, cand.order_quantity)
+    return -(cfg.order_cost * inputs.annual_demand / cand.order_quantity
+             + cfg.holding_rate * c_q * (cand.order_quantity / 2.0
+                                         + ss_units(inputs, cand.service_level)))
+
+
+def _u_cfo(inputs: HatInputs, cand: Candidate) -> float:
+    """-(WACC * c(Q) * (Q/2 + SS)): the capital slice only (D5, no double count)."""
+    c_q = unit_cost_at(inputs, cand.order_quantity)
+    return -(inputs.config.wacc * c_q * (cand.order_quantity / 2.0
+                                         + ss_units(inputs, cand.service_level)))
+
+
+def _u_comercial(inputs: HatInputs, cand: Candidate) -> float:
+    """Fill rate beta at (Q, SL); 1.0 when demand has no variability."""
+    sigma_l = sigma_over_lead(inputs)
+    if sigma_l <= 0:
+        return 1.0
+    return fill_rate_from_safety_stock(
+        ss_units(inputs, cand.service_level), cand.order_quantity, sigma_l)
+
+
+def utilities_raw(
+    inputs: HatInputs, candidates: tuple[Candidate, ...],
+) -> dict[str, tuple[float, ...]]:
+    """Raw utilities per hat, aligned with `candidates`.
+
+    Planner (spec sec 4): candidates below sl_target get a FINITE penalty strictly
+    below every valid candidate, ordered by deficit:
+        u = u_min_valid - (sl_target - SL) * range_valid,
+        range_valid = max(u_max_valid - u_min_valid, 1.0).
+    If NO candidate meets sl_target (injectable sl_target above the grid), the
+    empty-valid-set convention u_min_valid=0.0, range_valid=1.0 keeps the
+    deficit ordering and stays deterministic.
+    """
+    sl_target = inputs.config.sl_target
+    planner_valid = [
+        _u_planner_valid(inputs, c) for c in candidates if c.service_level >= sl_target
+    ]
+    if planner_valid:
+        u_min_valid = min(planner_valid)
+        range_valid = max(max(planner_valid) - u_min_valid, 1.0)
+    else:
+        u_min_valid, range_valid = 0.0, 1.0
+
+    def planner(cand: Candidate) -> float:
+        if cand.service_level >= sl_target:
+            return _u_planner_valid(inputs, cand)
+        return u_min_valid - (sl_target - cand.service_level) * range_valid
+
+    return {
+        HAT_COMPRADOR: tuple(_u_comprador(inputs, c) for c in candidates),
+        HAT_PLANNER: tuple(planner(c) for c in candidates),
+        HAT_CFO: tuple(_u_cfo(inputs, c) for c in candidates),
+        HAT_COMERCIAL: tuple(_u_comercial(inputs, c) for c in candidates),
+    }
+
+
+# -- D2: min-max normalization ----------------------------------------------------
+
+
+def normalize(values: tuple[float, ...]) -> tuple[float, ...]:
+    """u_norm = (u - min) / (max - min) over the WHOLE candidate set; a flat
+    hat (max == min) normalizes to 0.5 everywhere (D2 border)."""
+    lo, hi = min(values), max(values)
+    if hi == lo:
+        return tuple(0.5 for _ in values)
+    return tuple((v - lo) / (hi - lo) for v in values)
+
+
+# -- Deterministic selection (spec sec 6) --------------------------------------------
+
+
+def select_best_index(
+    scores: tuple[float, ...],
+    judge_costs: tuple[float, ...],
+    candidates: tuple[Candidate, ...],
+) -> int:
+    """argmax(scores) with the shared tie-break: (1) lower judge C, (2) lower Q,
+    (3) lower SL. Used by every ideal AND by the settlement -- same rule, so
+    w_x=1 collapses exactly onto hat x's ideal."""
+    best = 0
+    for i in range(1, len(scores)):
+        a, b = scores[i], scores[best]
+        if a > b:
+            best = i
+        elif a == b:
+            ka = (judge_costs[i], candidates[i].order_quantity, candidates[i].service_level)
+            kb = (judge_costs[best], candidates[best].order_quantity, candidates[best].service_level)
+            if ka < kb:
+                best = i
+    return best
+
+
+# -- KPIs per hat at a candidate (frozen keys; council/job/tests rely on them) ---
+
+
+def hat_kpis(inputs: HatInputs, hat_key: str, cand: Candidate) -> dict[str, float]:
+    c_q = unit_cost_at(inputs, cand.order_quantity)
+    ss = ss_units(inputs, cand.service_level)
+    avg_inv_usd = c_q * (cand.order_quantity / 2.0 + ss)
+    if hat_key == HAT_COMPRADOR:
+        return {
+            "effective_unit_cost": c_q + inputs.config.order_cost / cand.order_quantity,
+            "unit_price": c_q,
+            "orders_per_year": inputs.annual_demand / cand.order_quantity,
+        }
+    if hat_key == HAT_PLANNER:
+        return {
+            "policy_cost": -_u_planner_valid(inputs, cand),
+            "service_level": cand.service_level,
+            "safety_stock_units": ss,
+        }
+    if hat_key == HAT_CFO:
+        return {
+            "capital_charge_usd": inputs.config.wacc * avg_inv_usd,
+            "avg_inventory_usd": avg_inv_usd,
+            "dio_days": days_inventory_outstanding(avg_inv_usd, inputs.annual_demand * c_q),
+        }
+    if hat_key == HAT_COMERCIAL:
+        return {
+            "fill_rate": _u_comercial(inputs, cand),
+            "expected_units_short_per_year": _expected_units_short_per_year(inputs, cand),
+        }
+    raise ValueError(f"unknown hat: {hat_key}")
+
+
+_HEADLINE = {
+    HAT_COMPRADOR: "effective_unit_cost",
+    HAT_PLANNER: "policy_cost",
+    HAT_CFO: "capital_charge_usd",
+    HAT_COMERCIAL: "fill_rate",
+}
+
+
+def headline_kpi(hat_key: str) -> str:
+    """The one KPI each hat's acta row is written in (its own units)."""
+    return _HEADLINE[hat_key]
+
+
+# -- One evaluation of the whole grid (shared by N4 and N5) -----------------------
+
+
+@dataclass(frozen=True)
+class GridEvaluation:
+    """Everything both levels need, computed once per SKU."""
+
+    candidates: tuple[Candidate, ...]
+    judge_costs: tuple[float, ...]
+    utilities_raw: dict[str, tuple[float, ...]]
+    utilities_norm: dict[str, tuple[float, ...]]
+
+
+def evaluate(inputs: HatInputs) -> GridEvaluation:
+    cands = candidate_grid(inputs)
+    raw = utilities_raw(inputs, cands)
+    return GridEvaluation(
+        candidates=cands,
+        judge_costs=tuple(decision_cost(inputs, c) for c in cands),
+        utilities_raw=raw,
+        utilities_norm={k: normalize(v) for k, v in raw.items()},
     )

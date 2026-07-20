@@ -195,3 +195,81 @@ def test_ss_units_matches_engine_safety_stock():
     inp = _inputs()
     assert ss_units(inp, 0.95) == pytest.approx(
         safety_stock(30.0, 0.95, risk_periods=1.0).safety_stock)
+
+
+# -- utilities, normalization, tie-break (D2, D3, sec 6) --------------------------
+
+from src.hats import (  # noqa: E402
+    HAT_CFO,
+    HAT_PLANNER,
+    evaluate,
+    hat_kpis,
+    headline_kpi,
+    normalize,
+    select_best_index,
+    utilities_raw,
+)
+
+
+def test_normalize_minmax_and_flat_edge():
+    assert normalize((2.0, 4.0, 3.0)) == (0.0, 1.0, 0.5)
+    assert normalize((7.0, 7.0)) == (0.5, 0.5)          # D2 border: max == min
+
+
+def test_planner_penalty_orders_invalid_candidates_by_deficit():
+    """Below sl_target every candidate must be strictly worse than every valid
+    one, and less deficit must rank better (spec sec 4 planner row)."""
+    inp = _inputs()
+    cands = (
+        Candidate(400.0, 0.90), Candidate(400.0, 0.925), Candidate(400.0, 0.95),
+        Candidate(400.0, 0.99),
+    )
+    u = utilities_raw(inp, cands)["planner"]
+    assert u[0] < u[1] < min(u[2], u[3])                 # invalid < all valid, by deficit
+    assert all(x == x and abs(x) != float("inf") for x in u)   # finite (QA gate needs it)
+
+
+def test_comprador_utility_is_flat_in_sl():
+    inp = _inputs()
+    u = utilities_raw(inp, (Candidate(400.0, 0.90), Candidate(400.0, 0.99)))["comprador"]
+    assert u[0] == u[1]
+
+
+def test_comercial_fill_rate_is_one_when_no_variability():
+    inp = _inputs(std_weekly=0.0)
+    u = utilities_raw(inp, (Candidate(400.0, 0.90),))["comercial"]
+    assert u[0] == 1.0
+
+
+def test_select_best_index_tie_break_judge_then_q_then_sl():
+    cands = (Candidate(200.0, 0.95), Candidate(100.0, 0.95), Candidate(100.0, 0.90))
+    # scores tied everywhere -> judge decides; judge tied -> lower Q; then lower SL
+    assert select_best_index((1.0, 1.0, 1.0), (5.0, 4.0, 6.0), cands) == 1
+    assert select_best_index((1.0, 1.0, 1.0), (5.0, 5.0, 5.0), cands) == 2  # Q=100,SL=0.90
+    assert select_best_index(
+        (1.0, 1.0), (5.0, 5.0), (Candidate(100.0, 0.95), Candidate(100.0, 0.90))) == 1
+
+
+def test_evaluate_produces_aligned_norms_in_unit_range():
+    inp = _inputs()
+    ev = evaluate(inp)
+    assert len(ev.candidates) == len(ev.judge_costs)
+    for key in HAT_KEYS:
+        norms = ev.utilities_norm[key]
+        assert len(norms) == len(ev.candidates)
+        assert all(0.0 <= n <= 1.0 for n in norms)
+        assert max(norms) == 1.0                        # someone hits their ideal
+
+
+def test_hat_kpis_have_frozen_keys():
+    inp = _inputs()
+    cand = Candidate(400.0, 0.95)
+    assert set(hat_kpis(inp, HAT_COMPRADOR, cand)) == {
+        "effective_unit_cost", "unit_price", "orders_per_year"}
+    assert set(hat_kpis(inp, HAT_PLANNER, cand)) == {
+        "policy_cost", "service_level", "safety_stock_units"}
+    assert set(hat_kpis(inp, HAT_CFO, cand)) == {
+        "capital_charge_usd", "avg_inventory_usd", "dio_days"}
+    assert set(hat_kpis(inp, HAT_COMERCIAL, cand)) == {
+        "fill_rate", "expected_units_short_per_year"}
+    assert headline_kpi(HAT_CFO) == "capital_charge_usd"
