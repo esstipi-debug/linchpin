@@ -14,12 +14,19 @@ from itertools import combinations
 from src.hats import (
     HAT_CFO,
     HAT_COMERCIAL,
+    HAT_COMPRADOR,
     HAT_KEYS,
+    HAT_PLANNER,
+    Candidate,
     GridEvaluation,
     HatEvaluation,
     HatInputs,
+    baseline_plan,
+    decision_cost,
     evaluate,
     hat_kpis,
+    headline_kpi,
+    parse_weights,
     select_best_index,
 )
 
@@ -80,4 +87,128 @@ def tension_map(inputs: HatInputs, ev: GridEvaluation | None = None) -> TensionM
     return TensionMap(
         sku=inputs.sku, ideals=ideals, clashes=tuple(clashes),
         candidates_evaluated=len(ev.candidates),
+    )
+
+
+@dataclass(frozen=True)
+class ActaEntry:
+    """One hat's line in the concession record: where it wanted to be, how much
+    of its ideal it keeps at the chosen plan, and its own KPI at both points
+    (units per src.hats.headline_kpi)."""
+
+    hat_key: str
+    ideal: Candidate
+    utility_norm_at_chosen: float
+    concesion: float              # 1 - utility_norm_at_chosen, in [0, 1]
+    kpi_ideal: float
+    kpi_chosen: float
+
+
+@dataclass(frozen=True)
+class Settlement:
+    """N5: one reconciled plan + the acta. `weights` is the operator's POLICY
+    (D4) -- normalized here, echoed everywhere the settlement is rendered.
+    `value_vs_baseline_usd` is SIGNED: negative under extreme weight policies
+    is information (what that policy costs), reported without makeup."""
+
+    sku: str
+    chosen: Candidate
+    weights: dict[str, float]
+    acta: tuple[ActaEntry, ...]
+    judge_cost_chosen: float
+    judge_cost_baseline: float
+    value_vs_baseline_usd: float
+
+
+@dataclass(frozen=True)
+class ValueRow:
+    """One row of the spec sec 9 value table (all judge costs, $/year)."""
+
+    sku: str
+    c_baseline: float
+    c_comprador: float
+    c_planner: float
+    c_cfo: float
+    c_comercial: float
+    c_n5: float
+    delta_usd: float              # c_baseline - c_n5, signed
+
+
+def settle(
+    inputs: HatInputs,
+    weights: str | dict | None,
+    ev: GridEvaluation | None = None,
+) -> Settlement:
+    """Weighted sum of NORMALIZED utilities over the grid, shared tie-break.
+
+    The weights are re-validated/normalized here (parse_weights) so every
+    caller path shares one validation. With w_x = 1 the score equals hat x's
+    normalized utility, so the settlement collapses exactly onto x's ideal
+    (same argmax, same tie-break).
+    """
+    w = parse_weights(weights)
+    ev = ev if ev is not None else evaluate(inputs)
+    scores = tuple(
+        sum(w[k] * ev.utilities_norm[k][i] for k in HAT_KEYS)
+        for i in range(len(ev.candidates))
+    )
+    idx = select_best_index(scores, ev.judge_costs, ev.candidates)
+    chosen = ev.candidates[idx]
+    ideals = {k: ideal_for(inputs, ev, k) for k in HAT_KEYS}
+    acta = tuple(
+        ActaEntry(
+            hat_key=k,
+            ideal=ideals[k].candidate,
+            utility_norm_at_chosen=ev.utilities_norm[k][idx],
+            concesion=1.0 - ev.utilities_norm[k][idx],
+            kpi_ideal=ideals[k].kpis[headline_kpi(k)],
+            kpi_chosen=hat_kpis(inputs, k, chosen)[headline_kpi(k)],
+        )
+        for k in HAT_KEYS
+    )
+    c_base = decision_cost(inputs, baseline_plan(inputs))
+    c_chosen = ev.judge_costs[idx]
+    return Settlement(
+        sku=inputs.sku, chosen=chosen, weights=w, acta=acta,
+        judge_cost_chosen=c_chosen, judge_cost_baseline=c_base,
+        value_vs_baseline_usd=c_base - c_chosen,
+    )
+
+
+def top1_by_judge(inputs: HatInputs, tmap: TensionMap) -> Candidate:
+    """N4's top-1: cheapest by judge among the 4 ideals + the baseline --
+    the informational ranking the OPTIONS outcome scores by (spec sec 7)."""
+    cands = tuple(tmap.ideals[k].candidate for k in HAT_KEYS) + (baseline_plan(inputs),)
+    costs = tuple(decision_cost(inputs, c) for c in cands)
+    idx = select_best_index(tuple(-c for c in costs), costs, cands)
+    return cands[idx]
+
+
+def agreement_at_1(pairs: list[tuple[Candidate, Candidate]]) -> float:
+    """Fraction of SKUs where N4's top-1 (by judge) coincides with the N5
+    settlement. Both come from the same grid, so exact equality is meaningful.
+    This is the declared offline proxy for the human choice (spec sec 9)."""
+    if not pairs:
+        raise ValueError("agreement_at_1 needs at least one (top1, chosen) pair")
+    hits = sum(
+        1 for top1, chosen in pairs
+        if top1.order_quantity == chosen.order_quantity
+        and top1.service_level == chosen.service_level
+    )
+    return hits / len(pairs)
+
+
+def value_row(inputs: HatInputs, tmap: TensionMap, settlement: Settlement) -> ValueRow:
+    """One spec sec 9 row: judge cost at baseline (a), at each hat's ideal
+    (comercial is (b)), at the settlement (c), and Delta $ = a - c."""
+    c = {k: decision_cost(inputs, tmap.ideals[k].candidate) for k in HAT_KEYS}
+    return ValueRow(
+        sku=inputs.sku,
+        c_baseline=settlement.judge_cost_baseline,
+        c_comprador=c[HAT_COMPRADOR],
+        c_planner=c[HAT_PLANNER],
+        c_cfo=c[HAT_CFO],
+        c_comercial=c[HAT_COMERCIAL],
+        c_n5=settlement.judge_cost_chosen,
+        delta_usd=settlement.judge_cost_baseline - settlement.judge_cost_chosen,
     )

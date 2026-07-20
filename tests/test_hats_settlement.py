@@ -1,0 +1,91 @@
+"""Settlement (N5) tests: weight collapse, bounds, determinism, acta, value (spec 12.2)."""
+
+import pytest
+
+from src.hat_council import (
+    agreement_at_1,
+    settle,
+    tension_map,
+    top1_by_judge,
+    value_row,
+)
+from src.hats import HAT_KEYS, Candidate, HatConfig, baseline_plan, build_inputs
+
+
+def _inputs(**kw):
+    base = dict(sku="SKU-T", annual_demand=5200.0, mean_weekly=100.0, std_weekly=30.0,
+                lead_time_weeks=1.0, unit_cost=10.0, config=HatConfig())
+    base.update(kw)
+    return build_inputs(**base)
+
+
+@pytest.mark.parametrize("hat", list(HAT_KEYS))
+def test_single_weight_collapses_to_that_hats_ideal(hat):
+    """Spec acceptance #3: --weights <hat>=1 == that hat's ideal, for all 4."""
+    inp = _inputs()
+    s = settle(inp, {hat: 1.0})
+    assert s.chosen == tension_map(inp).ideals[hat].candidate
+    entry = next(e for e in s.acta if e.hat_key == hat)
+    assert entry.concesion == pytest.approx(0.0)
+
+
+def test_equal_weights_land_between_the_extreme_ideals():
+    inp = _inputs()
+    tmap = tension_map(inp)
+    qs = [tmap.ideals[k].candidate.order_quantity for k in HAT_KEYS]
+    s = settle(inp, None)
+    assert min(qs) <= s.chosen.order_quantity <= max(qs)
+
+
+def test_settlement_is_deterministic():
+    inp = _inputs()
+    assert settle(inp, None) == settle(inp, None)
+
+
+def test_acta_covers_all_hats_with_unit_interval_concessions():
+    s = settle(_inputs(), "cfo=2,planner=1,comprador=1,comercial=1")
+    assert sum(s.weights.values()) == pytest.approx(1.0)
+    assert s.weights["cfo"] == pytest.approx(0.4)
+    assert [e.hat_key for e in s.acta] == list(HAT_KEYS)      # fixed order
+    for e in s.acta:
+        assert 0.0 <= e.concesion <= 1.0
+        assert e.concesion == pytest.approx(1.0 - e.utility_norm_at_chosen)
+        assert e.kpi_ideal == e.kpi_ideal and e.kpi_chosen == e.kpi_chosen  # not NaN
+
+
+def test_settlement_value_is_baseline_minus_chosen_signed():
+    s = settle(_inputs(), None)
+    assert s.value_vs_baseline_usd == pytest.approx(s.judge_cost_baseline - s.judge_cost_chosen)
+    assert s.judge_cost_chosen > 0 and s.judge_cost_baseline > 0
+
+
+def test_settle_rejects_bad_weights():
+    with pytest.raises(ValueError):
+        settle(_inputs(), "gerente=1")
+
+
+def test_top1_by_judge_is_one_of_ideals_or_baseline():
+    inp = _inputs()
+    tmap = tension_map(inp)
+    top1 = top1_by_judge(inp, tmap)
+    pool = [tmap.ideals[k].candidate for k in HAT_KEYS] + [baseline_plan(inp)]
+    assert top1 in pool
+
+
+def test_agreement_at_1_bounds_and_values():
+    a, b = Candidate(100.0, 0.95), Candidate(200.0, 0.99)
+    assert agreement_at_1([(a, a)]) == 1.0
+    assert agreement_at_1([(a, a), (a, b)]) == 0.5
+    with pytest.raises(ValueError):
+        agreement_at_1([])
+
+
+def test_value_row_mirrors_settlement_and_ideals():
+    inp = _inputs()
+    tmap = tension_map(inp)
+    s = settle(inp, None)
+    row = value_row(inp, tmap, s)
+    assert row.sku == "SKU-T"
+    assert row.c_baseline == s.judge_cost_baseline
+    assert row.c_n5 == s.judge_cost_chosen
+    assert row.delta_usd == pytest.approx(row.c_baseline - row.c_n5)
