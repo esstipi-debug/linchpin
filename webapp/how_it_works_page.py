@@ -290,6 +290,7 @@ _FOOT = """
   Full technical detail: <code>documentation/KERN_NIVEL_REFERENCIA_SCM.md</code>.
 </div></footer>
 </main>
+<script src="/static/how_it_works.js"></script>
 </body>
 </html>
 """

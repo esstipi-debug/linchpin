@@ -141,3 +141,8 @@ def test_page_has_trademark_disclaimer_and_source_doc_link() -> None:
 def test_page_has_quiet_nav_links() -> None:
     html = render_how_it_works_html()
     assert 'href="/"' in html
+
+
+def test_page_loads_the_interactivity_script() -> None:
+    html = render_how_it_works_html()
+    assert '<script src="/static/how_it_works.js"></script>' in html
