@@ -111,6 +111,11 @@ TOOL_CONCEPTS: dict[str, tuple[str, ...]] = {
     # 3 hops from that hub; their combined closure is 330 nodes with 4 mild magnets, two of
     # which are excluded below. Verified by graph BFS 2026-07-18.
     "launch_readiness": ("new_product_forecasting", "risk_period", "lead_time_gap"),
+    # Both hat tools decide the SAME (Q, SL) space as inventory_optimization,
+    # so they seed from its anchors (spec 2026-07-20 Sec.10); the settlement adds
+    # the working-capital lens (its acta is priced in capital terms).
+    "hat_tension": ("safety_stock", "service_level", "cycle_service_level"),
+    "hat_settlement": ("safety_stock", "service_level", "working_capital_efficiency"),
 }
 
 # tool_key -> concept ids that must NEVER be cited for this tool, even when
@@ -137,6 +142,14 @@ EXCLUDED_CONCEPTS: dict[str, tuple[str, ...]] = {
     # (facility_location, capacity_planning) - unrelated to a stock-coverage-for-launch
     # check. Both verified to exist in the graph (test_every_excluded_concept_exists).
     "launch_readiness": ("facility_location", "capacity_planning"),
+    # BFS over knowledge/scm-books/graph.json (2026-07-20): the tension anchors'
+    # 2-hop closure (646 nodes) reaches reverse_auction and procurement_auction
+    # through shared book hubs. Both are competitive-bidding procurement
+    # mechanisms - topically unrelated to an internal role-tension map - and ride
+    # the "compras"/procurement lexical overlap of this tool's keywords: the
+    # PR #164 false-friend class. The settlement anchors' closure (386 nodes)
+    # contains neither; no exclusions needed there.
+    "hat_tension": ("reverse_auction", "procurement_auction"),
 }
 
 

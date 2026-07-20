@@ -14,10 +14,13 @@ files belong to the inventory_optimization intake path, not here.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 import pandas as pd
 
+from src.deliverable import DataSource, Deliverable, Finding, Kpi
 from src.eoq import PriceBreak
+from src.export import write_summary_csv
 from src.guided import (
     EXECUTED,
     HANDOFF,
@@ -393,3 +396,153 @@ def verify_settlement(report: SettlementReport) -> list[str]:
         if abs(s.value_vs_baseline_usd - (s.judge_cost_baseline - s.judge_cost_chosen)) > 1e-6:
             issues.append(f"{s.sku}: value_vs_baseline_usd inconsistent")
     return issues
+
+
+# -- Deliverables -------------------------------------------------------------
+
+
+def write_tension(report: TensionReport, out_dir, client: str = "Client") -> dict[str, Path]:
+    """One row per (SKU, hat): the ideal + that hat's headline KPI, plus the
+    SKU's top clash repeated per row for filterability."""
+    d = Path(out_dir)
+    d.mkdir(parents=True, exist_ok=True)
+    rows = []
+    for m in report.maps:
+        top = m.clashes[0]
+        for k in HAT_KEYS:
+            e = m.ideals[k]
+            rows.append({
+                "sku": m.sku,
+                "hat": k,
+                "ideal_q": round(e.candidate.order_quantity, 1),
+                "ideal_service_level": e.candidate.service_level,
+                "kpi": headline_kpi(k),
+                "kpi_value": round(e.kpis[headline_kpi(k)], 4),
+                "top_clash": f"{top.hat_a} vs {top.hat_b}",
+                "top_clash_capital_usd": round(top.delta_capital_usd, 2),
+                "price_breaks": "assumed" if report.price_breaks_assumed else "real",
+            })
+    return {"csv": write_summary_csv(rows, d / "hat_tension.csv")}
+
+
+def write_settlement(report: SettlementReport, out_dir, client: str = "Client") -> dict[str, Path]:
+    """One row per SKU: the chosen plan, both judge costs, the signed value and
+    every hat's concession."""
+    d = Path(out_dir)
+    d.mkdir(parents=True, exist_ok=True)
+    rows = []
+    for s in report.settlements:
+        row = {
+            "sku": s.sku,
+            "chosen_q": round(s.chosen.order_quantity, 1),
+            "chosen_service_level": s.chosen.service_level,
+            "judge_cost_chosen": round(s.judge_cost_chosen, 2),
+            "judge_cost_baseline": round(s.judge_cost_baseline, 2),
+            "value_vs_baseline_usd": round(s.value_vs_baseline_usd, 2),
+        }
+        for e in s.acta:
+            row[f"concesion_{e.hat_key}"] = round(e.concesion, 4)
+        rows.append(row)
+    return {"csv": write_summary_csv(rows, d / "hat_settlement.csv")}
+
+
+def _assumed_finding() -> Finding:
+    return Finding(
+        "Tarifario (assumed)",
+        "los descuentos por volumen son sinteticos: -2% en 2x EOQ, -4% en 4x EOQ (D8).",
+        impact="pedir el tarifario real del proveedor antes de negociar cantidades")
+
+
+def build_tension_deck(report: TensionReport, *, client: str = "Client", prepared: str = "",
+                       citations: tuple[str, ...] = (), confidence: float = 0.8) -> Deliverable:
+    """The N4 study: what each hat wants, what the disagreement costs in $."""
+    order = sorted(report.maps, key=lambda m: (-abs(m.clashes[0].delta_capital_usd), m.sku))
+    flag = order[0]
+    top = flag.clashes[0]
+    summary = (f"Tension de la decision de reabastecimiento sobre {report.n_skus} SKU(s): "
+               "ideales por sombrero y choques valuados en usd. La eleccion es humana.")
+    findings = [
+        Finding("Top clash",
+                f"{flag.sku}: {top.hat_a} vs {top.hat_b} difieren en "
+                f"{abs(top.delta_capital_usd):,.0f} usd de inventario promedio.",
+                impact="la brecha mas cara entre areas - resolverla primero"),
+        Finding("Cobertura",
+                f"{report.n_skus} SKU(s), {flag.candidates_evaluated} candidatos evaluados "
+                "por SKU sobre la misma grilla determinista (Q x SL).",
+                impact="los 4 sombreros puntuan candidatos identicos - comparables"),
+    ]
+    if report.price_breaks_assumed:
+        findings.append(_assumed_finding())
+    kpis = (
+        Kpi("SKUs", f"{report.n_skus}", rationale="SKUs con tension mapeada"),
+        Kpi("Top clash", f"{flag.sku}: {abs(top.delta_capital_usd):,.0f} usd",
+            target="resolver", rationale="mayor brecha de inventario promedio entre ideales"),
+        Kpi("Opciones por decision", f"{len(HAT_KEYS) + 1}", rationale="4 ideales + baseline"),
+        Kpi("Tarifario", "assumed" if report.price_breaks_assumed else "real",
+            rationale="origen de los price breaks (D8)"),
+    )
+    data_sources = (
+        DataSource("Demanda semanal + costo unitario + lead time por SKU",
+                   "export WMS/ERP (CSV)", "semanal"),
+        DataSource("Price breaks del proveedor",
+                   "tarifario del proveedor (sintetico '(assumed)' si falta)", "por negociacion"),
+    )
+    recommendations = (
+        "Usar el mapa en la mesa compras-finanzas-comercial: cada area ve que cede.",
+        "Elegir una de las 5 opciones, o pedir el settlement N5 con pesos explicitos.",
+        "Si el tarifario es (assumed), pedir los price breaks reales y re-correr.",
+    )
+    return Deliverable(
+        title="Decision Tension Map (Replenishment)", client=client, summary=summary,
+        findings=tuple(findings), kpis=kpis, data_sources=data_sources,
+        recommendations=recommendations, citations=tuple(citations), confidence=confidence,
+        residual="La eleccion entre opciones es humana: este mapa hace visible el conflicto, "
+                 "no lo resuelve. El ranking por costo juez es solo orden informativo.",
+        prepared=prepared)
+
+
+def build_settlement_deck(report: SettlementReport, *, client: str = "Client", prepared: str = "",
+                          citations: tuple[str, ...] = (), confidence: float = 0.8) -> Deliverable:
+    """The N5 study: the reconciled plan, its signed $ value, and the acta."""
+    worst = max(report.settlements, key=lambda s: max(e.concesion for e in s.acta))
+    summary = (f"Plan reconciliado (Q*, SL*) para {report.n_skus} SKU(s): valor vs baseline "
+               f"{report.total_value_usd:+,.0f} usd/anio. Pesos = politica del operador.")
+    findings = [
+        Finding("Valor vs baseline",
+                f"{report.total_value_usd:+,.0f} usd/anio agregado (con signo: un valor "
+                "negativo ES informacion - lo que cuesta esa politica de pesos).",
+                impact="el numero que justifica (o cuestiona) la politica de pesos"),
+        Finding("Concesion maxima",
+                f"{worst.sku}: " + "; ".join(f"{e.hat_key} cede {e.concesion:.2f}"
+                                             for e in worst.acta),
+                impact="que area paga mas por el consenso - revisarla con esa area"),
+    ]
+    if report.price_breaks_assumed:
+        findings.append(_assumed_finding())
+    kpis = (
+        Kpi("SKUs", f"{report.n_skus}", rationale="SKUs con plan reconciliado"),
+        Kpi("Valor vs baseline", f"{report.total_value_usd:+,.0f} usd/anio", target="> 0",
+            rationale="costo juez del baseline menos costo juez del plan (signed)"),
+        Kpi("Pesos", _weights_str(report.weights), rationale="politica del operador (D4)"),
+        Kpi("Tarifario", "assumed" if report.price_breaks_assumed else "real",
+            rationale="origen de los price breaks (D8)"),
+    )
+    data_sources = (
+        DataSource("Demanda semanal + costo unitario + lead time por SKU",
+                   "export WMS/ERP (CSV)", "semanal"),
+        DataSource("Price breaks del proveedor",
+                   "tarifario del proveedor (sintetico '(assumed)' si falta)", "por negociacion"),
+    )
+    recommendations = (
+        "Aplicar Q*/SL* por SKU via el proceso de compra (packet HANDOFF adjunto).",
+        "Revisar el acta: si una concesion duele, cambiar los pesos ES la conversacion.",
+        "Re-correr con el tarifario real del proveedor si los breaks son (assumed).",
+    )
+    return Deliverable(
+        title="Reconciled Replenishment Plan", client=client, summary=summary,
+        findings=tuple(findings), kpis=kpis, data_sources=data_sources,
+        recommendations=recommendations, citations=tuple(citations), confidence=confidence,
+        residual="Los pesos son politica del operador, no consenso objetivo (D4). Aplicar el "
+                 "plan es un paso humano (HANDOFF); cualquier escritura a un sistema de "
+                 "registro pasa por src/writeback.py - fuera de alcance aqui.",
+        prepared=prepared)

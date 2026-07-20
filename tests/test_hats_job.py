@@ -6,6 +6,8 @@ import pandas as pd
 import pytest
 
 from jobs import hats_job
+from scm_agent import intent, llm, tools
+from scm_agent.orchestrator import Orchestrator
 from src.guided import EXECUTED, HANDOFF, OPTIONS, as_executed, passed_guided
 from src.hats import HAT_KEYS
 
@@ -131,3 +133,68 @@ def test_verify_settlement_passes_and_blocks_executed(tmp_path):
     assert hats_job.verify_settlement(report) == []
     broken = replace(report, outcome=as_executed("nope"))
     assert hats_job.verify_settlement(broken)
+
+
+# -- Task 7: deliverables + wiring (registration, routing, end-to-end) ---------
+
+
+def test_write_operational_and_decks(tmp_path):
+    payload = hats_job.prepare(_csv(tmp_path))
+    t = hats_job.run_tension(payload)
+    s = hats_job.run_settlement(payload)
+    out_t = hats_job.write_tension(t, tmp_path / "d1")
+    out_s = hats_job.write_settlement(s, tmp_path / "d2")
+    assert out_t["csv"].exists() and out_s["csv"].exists()
+    assert hats_job.build_tension_deck(t).title == "Decision Tension Map (Replenishment)"
+    deck = hats_job.build_settlement_deck(s)
+    assert deck.title == "Reconciled Replenishment Plan"
+    assert "politica" in deck.residual
+
+
+def test_registry_registers_both_hat_tools():
+    keys = {t.key for t in tools.build_default_registry().list()}
+    assert {"hat_tension", "hat_settlement"} <= keys
+
+
+def test_briefs_route_to_each_tool():
+    """Spec acceptance #2: the orchestrator routes each phrasing to its tool."""
+    reg = tools.build_default_registry()
+    assert intent.classify(
+        "quiero el mapa de tension entre areas para la decision de compra",
+        reg, llm.RulesFallback()).job_type == "hat_tension"
+    assert intent.classify(
+        "armame el plan reconciliado de compra con acta de concesiones",
+        reg, llm.RulesFallback()).job_type == "hat_settlement"
+
+
+def test_orchestrator_needs_data_without_csv(tmp_path):
+    orch = Orchestrator(tools.build_default_registry(), llm.RulesFallback(), clients_root=None)
+    res = orch.run("mapa de tension entre areas", job_type="hat_tension",
+                   out_dir=str(tmp_path / "out"))
+    assert res.status == "needs_data"
+
+
+def test_orchestrator_needs_clarification_on_bad_weights(tmp_path):
+    orch = Orchestrator(tools.build_default_registry(), llm.RulesFallback(), clients_root=None)
+    res = orch.run("plan reconciliado de compra", data_path=_csv(tmp_path),
+                   job_type="hat_settlement", overrides={"weights": "cfo=-2"},
+                   out_dir=str(tmp_path / "out"))
+    assert res.status == "needs_clarification"
+
+
+def test_end_to_end_tension_run(tmp_path):
+    orch = Orchestrator(tools.build_default_registry(), llm.RulesFallback(), clients_root=None)
+    res = orch.run("mapa de tension entre areas para reabastecimiento",
+                   data_path=_csv(tmp_path), job_type="hat_tension",
+                   out_dir=str(tmp_path / "out"))
+    assert res.status == "ok"
+    assert res.guided is not None and res.guided.status == "options"
+
+
+def test_end_to_end_settlement_run(tmp_path):
+    orch = Orchestrator(tools.build_default_registry(), llm.RulesFallback(), clients_root=None)
+    res = orch.run("plan reconciliado de compra", data_path=_csv(tmp_path),
+                   job_type="hat_settlement", overrides={"weights": "cfo=1"},
+                   out_dir=str(tmp_path / "out"))
+    assert res.status == "ok"
+    assert res.guided is not None and res.guided.status == "handoff"
