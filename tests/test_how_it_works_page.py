@@ -93,3 +93,51 @@ def test_stepper_renders_all_stages() -> None:
     html = _stepper([("Brief", "A plain-language request."), ("QA", "Gate that vetoes bad results.")])
     assert "Brief" in html and "A plain-language request." in html
     assert "QA" in html and "Gate that vetoes bad results." in html
+
+
+from webapp.how_it_works_page import render_how_it_works_html  # noqa: E402
+
+
+def test_page_mentions_41_tools_and_33_sources_not_stale_numbers() -> None:
+    html = render_how_it_works_html()
+    assert "41" in html
+    assert "33" in html
+    assert "25 curated" not in html  # the README's stale source count must never appear here
+
+
+def test_page_has_both_donut_lenses_totaling_41() -> None:
+    html = render_how_it_works_html()
+    assert 'id="donut-domain"' in html
+    assert 'id="donut-scor"' in html
+    assert 'id="donut-guided"' in html  # the never-unprotected donut, 4 outcomes
+
+
+def test_page_lists_all_five_certifications() -> None:
+    html = render_how_it_works_html()
+    for name in ("CPIM", "CLTD", "CSCP", "SCPro", "CPSM"):
+        assert name in html
+
+
+def test_page_has_no_certification_overclaim_language() -> None:
+    html = render_how_it_works_html().lower()
+    assert "kern is certified" not in html
+    assert "kern is ascm-certified" not in html
+    assert "kern is iso" not in html
+
+
+def test_page_has_no_sales_content() -> None:
+    html = render_how_it_works_html().lower()
+    assert "buy.stripe.com" not in html
+    assert "btn-primary" not in html  # the site's CTA-button class, intentionally absent here
+
+
+def test_page_has_trademark_disclaimer_and_source_doc_link() -> None:
+    html = render_how_it_works_html()
+    assert "ASCM" in html
+    assert "not affiliated with" in html or "not certified by" in html
+    assert "KERN_NIVEL_REFERENCIA_SCM" in html
+
+
+def test_page_has_quiet_nav_links() -> None:
+    html = render_how_it_works_html()
+    assert 'href="/"' in html
