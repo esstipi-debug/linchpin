@@ -101,8 +101,8 @@ from webapp.how_it_works_data import (  # noqa: E402
     CERTIFICATIONS,
     DOMAIN_AREA_ORDER,
     HONEST_GAPS,
-    ISO_28000_ELEMENTS,
     ISO_9001_CLAUSES,
+    ISO_28000_ELEMENTS,
     SCOR_BUCKET_ORDER,
     TOOLS,
     CertCoverage,
@@ -274,7 +274,7 @@ _HEAD = """<!DOCTYPE html>
 <header>
   <div class="wrap">
     <span class="brand"><span class="d">&#9672;</span> Kern</span>
-    <nav><a href="/">Home</a><a href="/demo">Live console</a></nav>
+    <nav><a href="/">Home</a><a href="/console">Live console</a></nav>
   </div>
 </header>
 <main class="wrap">
@@ -319,7 +319,7 @@ def render_how_it_works_html() -> str:
 
     stepper_html = _stepper([
         ("Brief", "A plain-language request, optionally with a data file attached."),
-        ("Classify", "The orchestrator matches the brief's intent to one of 41 registered tools."),
+        ("Classify", f"The orchestrator matches the brief's intent to one of {tool_count} registered tools."),
         ("Run", "The matched tool's own prepare -> run pipeline executes against the data provided."),
         ("QA", "The tool's own QA gate checks the result. If QA fails, nothing ships -- zero deliverables."),
         ("Deliver", "A grounded, cited deliverable -- or, if execution wasn't safe, ranked options, a "
