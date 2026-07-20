@@ -157,9 +157,11 @@ def test_routes_on_english_discovery_phrasing_without_colliding_with_price_intel
     assert classified.job_type == "price_watch"
 
 
-def test_registry_now_has_41_tools():
+def test_registry_now_has_42_tools():
+    # supplier_management_tool() landed after this test was last updated (41 -> 42);
+    # bump this count again the next time a tool is registered, same as every prior update.
     reg = tools.build_default_registry()
-    assert len(reg.list()) == 41
+    assert len(reg.list()) == 42
 
 
 def test_scm_agent_tools_module_imports_without_circular_import():
