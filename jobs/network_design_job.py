@@ -21,7 +21,7 @@ import pandas as pd
 from src.deliverable import DataSource, Deliverable, Finding, Kpi
 from src.export import write_summary_csv
 from src.facility_location import DemandPoint
-from src.network_design import CandidateSite, solve_p_median
+from src.network_design import CandidateSite, NetworkDesign, solve_p_median
 
 _NAME_COLS = ("name", "location", "city", "node", "point", "site", "label")
 _X_COLS = ("x", "lon", "longitude", "x_coord", "easting")
@@ -128,7 +128,7 @@ def prepare(data_path: str, params: dict | None = None) -> dict:
     return prepare_records(pd.read_csv(data_path), params)
 
 
-def _summarize(design, demands: list[DemandPoint], sites: list[CandidateSite], p: int) -> str:
+def _summarize(design: NetworkDesign, demands: list[DemandPoint], sites: list[CandidateSite], p: int) -> str:
     """Human-readable one-liner for the solved (or infeasible) network."""
     if design.feasible:
         return (
