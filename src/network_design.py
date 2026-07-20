@@ -131,6 +131,30 @@ def _capacity_constraint(
     return LinearConstraint(a, lb=-np.inf, ub=0.0)
 
 
+def _build_constraints(
+    demands: list[DemandPoint],
+    sites: list[CandidateSite],
+    n_d: int,
+    n_s: int,
+    n_var: int,
+    p: int,
+    *,
+    respect_capacity: bool,
+) -> list[LinearConstraint]:
+    """Assemble the assignment/linking/count constraints, plus capacity when applicable."""
+    constraints: list[LinearConstraint] = [
+        _assignment_constraint(n_d, n_s, n_var),
+        _linking_constraint(n_d, n_s, n_var),
+        _count_constraint(p, n_s, n_var),
+    ]
+    cap_constraint = _capacity_constraint(
+        demands, sites, n_s, n_var, respect_capacity=respect_capacity
+    )
+    if cap_constraint is not None:
+        constraints.append(cap_constraint)
+    return constraints
+
+
 def _build_objective(
     demands: list[DemandPoint], sites: list[CandidateSite], n_s: int, n_var: int
 ) -> np.ndarray:
@@ -202,16 +226,9 @@ def solve_p_median(
 
     c = _build_objective(demands, sites, n_s, n_var)
 
-    constraints: list[LinearConstraint] = [
-        _assignment_constraint(n_d, n_s, n_var),
-        _linking_constraint(n_d, n_s, n_var),
-        _count_constraint(p, n_s, n_var),
-    ]
-    cap_constraint = _capacity_constraint(
-        demands, sites, n_s, n_var, respect_capacity=respect_capacity
+    constraints = _build_constraints(
+        demands, sites, n_d, n_s, n_var, p, respect_capacity=respect_capacity
     )
-    if cap_constraint is not None:
-        constraints.append(cap_constraint)
 
     integrality = np.ones(n_var)        # all variables binary
     bounds = Bounds(lb=0.0, ub=1.0)
