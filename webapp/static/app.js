@@ -184,8 +184,8 @@
       '<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px">' +
       '<span style="font-size:13px;font-weight:600">Budget utilization</span>' +
       '<span style="' + MONO + ';font-size:12px;color:var(--muted)">' + pct.toFixed(0) + "% of cap</span></div>" +
-      '<div style="height:10px;border-radius:6px;background:var(--track);overflow:hidden;position:relative">' +
-      '<div style="height:100%;border-radius:6px;width:' + Math.min(100, pct).toFixed(1) + "%;background:" + gColor + ';transition:width .5s cubic-bezier(0.16,1,0.3,1),background .3s"></div></div>' +
+      '<div class="bar-track" style="height:10px;position:relative">' +
+      '<div class="bar-fill-gloss" style="height:100%;width:' + Math.min(100, pct).toFixed(1) + "%;background:" + gColor + ';transition:width .5s cubic-bezier(0.16,1,0.3,1),background .3s"></div></div>' +
       '<div style="display:flex;justify-content:space-between;margin-top:7px;' + MONO + ';font-size:11px;color:var(--muted)"><span>requested ' + money(req) + "</span><span>cap " + money(cap) + "</span></div></div>";
 
     var cols = ["SKU", "Method", "Fcst/wk", "Q*", "Reorder", "Safety", "Inv value", "Status"];
@@ -292,9 +292,9 @@
       var inv = s.cycle_investment + s.ss_investment * scale;
       return '<div style="display:grid;grid-template-columns:64px 1fr 96px;gap:14px;align-items:center">' +
         '<span style="' + MONO + ';font-size:12px;font-weight:600;color:var(--txt-2)">' + s.id + "</span>" +
-        '<div style="height:18px;border-radius:5px;background:var(--track);overflow:hidden;display:flex">' +
-        '<div style="height:100%;width:' + cycleW + '%;background:var(--accent-bar);transition:width .55s cubic-bezier(0.16,1,0.3,1)"></div>' +
-        '<div style="height:100%;width:' + ssW + '%;background:var(--accent2-bar);transition:width .55s cubic-bezier(0.16,1,0.3,1)"></div></div>' +
+        '<div class="bar-track" style="height:18px;display:flex">' +
+        '<div class="bar-fill-gloss bar-fill-shimmer" style="height:100%;width:' + cycleW + '%;background:var(--accent-bar);transition:width .55s cubic-bezier(0.16,1,0.3,1)"></div>' +
+        '<div class="bar-fill-gloss bar-fill-safety" style="height:100%;width:' + ssW + '%;transition:width .55s cubic-bezier(0.16,1,0.3,1)"></div></div>' +
         '<span style="' + MONO + ';font-size:12px;text-align:right;color:var(--txt-2)">' + money(inv) + "</span></div>";
     }).join("");
 
@@ -329,7 +329,7 @@
       '<div style="border-top:1px solid var(--line);padding-top:16px;display:flex;flex-direction:column;gap:11px">' +
       stat("Requested", money(req)) + stat("Cycle-stock floor", money(cycleFloor), "var(--bad)") +
       stat("Safety-stock scale", (scale * 100).toFixed(0) + "%", "var(--accent-bright)") + stat("Final investment", money(tot.final), "var(--ok)") + "</div>" +
-      '<button data-action="export" style="margin-top:2px;border:1px solid var(--accent-bd);background:var(--accent-soft);color:var(--accent-bright);font-size:13px;font-weight:600;padding:10px;border-radius:var(--r-field);cursor:pointer;transition:background .15s">' +
+      '<button data-action="export" class="btn-warm-action" style="margin-top:2px">' +
       (state.exported ? "✓ plan exported (CSV)" : "Commit &amp; export plan (CSV)") + "</button></aside>";
 
     var right = '<div style="display:flex;flex-direction:column;gap:16px;min-width:0">' + banner +
@@ -393,7 +393,7 @@
     if (state.error) {
       root.innerHTML = shell('<div role="alert" style="padding:80px 28px;text-align:center"><div style="font-size:15px;font-weight:600;color:var(--bad)">Could not reach the engine</div>' +
         '<div style="font-size:12px;color:var(--muted);' + MONO + ';margin-top:8px">' + esc(state.error) + "</div>" +
-        '<button data-action="retry" style="margin-top:18px;border:1px solid var(--accent-bd);background:var(--accent-soft);color:var(--accent-bright);font-size:13px;font-weight:600;padding:9px 16px;border-radius:var(--r-field);cursor:pointer">Retry</button></div>');
+        '<button data-action="retry" class="btn-warm-action" style="margin-top:18px">Retry</button></div>');
       announce("Error reaching the engine: " + state.error);
     } else if (!state.data) {
       root.innerHTML = shell('<div role="status" style="padding:120px 28px;text-align:center;color:var(--muted);font-size:13px;' + MONO + '">Loading portfolio from the engine…</div>');
