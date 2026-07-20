@@ -95,3 +95,61 @@ def _donut_svg(
         f'dominant-baseline="middle">{escape(str(total))}</text>'
         + "</svg>"
     )
+
+
+from webapp.how_it_works_data import CertCoverage, IsoClause  # noqa: E402
+
+_LEVEL_FILL: dict[str, int] = {"High": 4, "Medium-high": 3, "Partial": 2}
+
+
+def _expandable_card(title: str, summary: str, detail_html: str, *, card_id: str) -> str:
+    return (
+        f'<button type="button" class="card-toggle" data-target="{escape(card_id)}" '
+        f'aria-expanded="false">'
+        f"<h3>{escape(title)}</h3><p class=\"sub\">{escape(summary)}</p>"
+        "</button>"
+        f'<div class="card-detail" id="{escape(card_id)}" hidden>{detail_html}</div>'
+    )
+
+
+def _coverage_bar(cert: CertCoverage, *, bar_id: str) -> str:
+    filled = _LEVEL_FILL.get(cert.level, 1)
+    segments = "".join(
+        f'<span class="bar-seg{" filled" if i < filled else ""}"></span>' for i in range(4)
+    )
+    covered_items = "".join(f"<li>{escape(item)}</li>" for item in cert.covered)
+    gap_items = "".join(f"<li>{escape(item)}</li>" for item in cert.gaps)
+    return (
+        f'<button type="button" class="cert-toggle" data-target="{escape(bar_id)}" '
+        f'aria-expanded="false">'
+        f'<span class="cert-name">{escape(cert.name)}</span>'
+        f'<span class="cert-body">{escape(cert.body)}</span>'
+        f'<span class="cert-bar" aria-hidden="true">{segments}</span>'
+        f'<span class="cert-level">{escape(cert.level)}</span>'
+        "</button>"
+        f'<div class="cert-detail" id="{escape(bar_id)}" hidden>'
+        f"<h4>Covered</h4><ul class=\"check\">{covered_items}</ul>"
+        f"<h4>Gaps</h4><ul class=\"gap\">{gap_items}</ul>"
+        "</div>"
+    )
+
+
+def _iso_accordion_row(clause: IsoClause, *, row_id: str) -> str:
+    return (
+        f'<button type="button" class="iso-toggle" data-target="{escape(row_id)}" '
+        f'aria-expanded="false">'
+        f'<span class="iso-clause">{escape(clause.clause)}</span>'
+        '<span class="iso-chevron" aria-hidden="true">&#9662;</span>'
+        "</button>"
+        f'<div class="iso-detail" id="{escape(row_id)}" hidden>'
+        f"<p>{escape(clause.kern_behavior)}</p></div>"
+    )
+
+
+def _stepper(stages: Sequence[tuple[str, str]]) -> str:
+    items = "".join(
+        f'<li class="step"><span class="step-name">{escape(name)}</span>'
+        f'<span class="step-detail">{escape(detail)}</span></li>'
+        for name, detail in stages
+    )
+    return f'<ol class="stepper">{items}</ol>'
