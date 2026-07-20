@@ -74,11 +74,20 @@
     });
   }
 
+  function bindLegendExpand() {
+    document.querySelectorAll(".legend-item").forEach(function (item) {
+      item.addEventListener("click", function () {
+        showBucket(item.getAttribute("data-donut"), item.getAttribute("data-bucket"));
+      });
+    });
+  }
+
   document.addEventListener("DOMContentLoaded", function () {
     bindToggle(".card-toggle");
     bindToggle(".cert-toggle");
     bindToggle(".iso-toggle");
     bindDonutLensTabs();
     bindDonutSegmentExpand();
+    bindLegendExpand();
   });
 })();

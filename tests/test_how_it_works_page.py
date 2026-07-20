@@ -145,7 +145,24 @@ def test_page_has_quiet_nav_links() -> None:
 
 def test_page_loads_the_interactivity_script() -> None:
     html = render_how_it_works_html()
-    assert '<script src="/static/how_it_works.js"></script>' in html
+    assert '<script src="/static/how_it_works.js?v=2"></script>' in html
+
+
+def test_both_donut_lenses_have_a_named_clickable_legend() -> None:
+    """Every donut segment's group must be nameable without hovering: each lens
+    carries a legend with one entry per bucket (swatch + name + count), wired
+    to the same reveal behavior as clicking the segment (data-donut/data-bucket)."""
+    from html import escape
+
+    from webapp.how_it_works_data import DOMAIN_AREA_ORDER, SCOR_BUCKET_ORDER
+
+    html = render_how_it_works_html()
+    for area in DOMAIN_AREA_ORDER:
+        assert f'data-donut="donut-domain" data-bucket="{escape(area)}"' in html
+    for bucket in SCOR_BUCKET_ORDER:
+        assert f'data-donut="donut-scor" data-bucket="{escape(bucket)}"' in html
+    # 9 domain entries + 7 SCOR entries = 16 legend rows total
+    assert html.count('class="legend-item"') == 16
 
 
 from fastapi.testclient import TestClient  # noqa: E402

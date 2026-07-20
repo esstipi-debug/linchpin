@@ -242,6 +242,12 @@ _HEAD = """<!DOCTYPE html>
   .tool-list .tool-row:last-child{border-bottom:none}
   .tool-list .tool-key{font:600 13px/1.3 var(--mono);color:var(--accent-bright)}
   .tool-list .tool-desc{display:block;font-size:12.5px;color:var(--txt-2);margin-top:2px}
+  .donut-legend{flex:0 1 240px;min-width:200px;display:flex;flex-direction:column;gap:4px;margin:0;padding:0}
+  .legend-item{display:flex;align-items:center;gap:9px;width:100%;text-align:left;background:transparent;border:1px solid transparent;border-radius:8px;padding:6px 9px;cursor:pointer;color:var(--txt-2);font:500 13px/1.3 var(--sans)}
+  .legend-item:hover{background:var(--panel);border-color:var(--line-2);color:var(--txt)}
+  .legend-swatch{flex:0 0 auto;width:11px;height:11px;border-radius:3px}
+  .legend-label{flex:1 1 auto}
+  .legend-count{flex:0 0 auto;font:600 12px/1 var(--mono);color:var(--muted)}
 
   /* -- expandable cards -- */
   .card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-top:16px}
@@ -290,7 +296,7 @@ _FOOT = """
   Full technical detail: <code>documentation/KERN_NIVEL_REFERENCIA_SCM.md</code>.
 </div></footer>
 </main>
-<script src="/static/how_it_works.js"></script>
+<script src="/static/how_it_works.js?v=2"></script>
 </body>
 </html>
 """
@@ -312,6 +318,24 @@ def _tool_list_html(order: Sequence[str], group_by: str, *, list_id: str) -> str
     return f'<div class="tool-list" id="{escape(list_id)}" hidden>{"".join(blocks)}</div>'
 
 
+def _donut_legend(segments: Sequence[tuple[str, int]], *, donut_id: str) -> str:
+    """A clickable legend beside a donut: color swatch + bucket name + count,
+    one row per segment, colors matching _donut_svg's _DONUT_COLORS order.
+    Clicking a row reveals the same bucket the matching donut segment would
+    (static/how_it_works.js binds .legend-item via data-donut/data-bucket) --
+    it is also a far larger hit target than the donut's thin stroke ring."""
+    rows = "".join(
+        f'<button type="button" class="legend-item" data-donut="{escape(donut_id)}" '
+        f'data-bucket="{escape(label)}">'
+        f'<span class="legend-swatch" style="background:{escape(_DONUT_COLORS[i % len(_DONUT_COLORS)])}"></span>'
+        f'<span class="legend-label">{escape(label)}</span>'
+        f'<span class="legend-count">{escape(str(count))}</span>'
+        "</button>"
+        for i, (label, count) in enumerate(segments)
+    )
+    return f'<div class="donut-legend" role="list" aria-label="Chart legend">{rows}</div>'
+
+
 def render_how_it_works_html() -> str:
     domain_tally = tally_by_domain_area()
     scor_tally = tally_by_scor_bucket()
@@ -326,12 +350,12 @@ def render_how_it_works_html() -> str:
                      "prepared handoff, or an escalation."),
     ])
 
-    domain_donut = _donut_svg(
-        [(area, domain_tally[area]) for area in DOMAIN_AREA_ORDER], element_id="donut-domain"
-    )
-    scor_donut = _donut_svg(
-        [(bucket, scor_tally[bucket]) for bucket in SCOR_BUCKET_ORDER], element_id="donut-scor"
-    )
+    domain_segments = [(area, domain_tally[area]) for area in DOMAIN_AREA_ORDER]
+    scor_segments = [(bucket, scor_tally[bucket]) for bucket in SCOR_BUCKET_ORDER]
+    domain_donut = _donut_svg(domain_segments, element_id="donut-domain")
+    scor_donut = _donut_svg(scor_segments, element_id="donut-scor")
+    domain_legend = _donut_legend(domain_segments, donut_id="donut-domain")
+    scor_legend = _donut_legend(scor_segments, donut_id="donut-scor")
     domain_list = _tool_list_html(DOMAIN_AREA_ORDER, "domain_area", list_id="donut-domain-list")
     scor_list = _tool_list_html(SCOR_BUCKET_ORDER, "scor_bucket", list_id="donut-scor-list")
 
@@ -410,17 +434,17 @@ def render_how_it_works_html() -> str:
     <button type="button" class="lens-tab" data-lens="scor" role="tab" aria-selected="false">By SCOR Digital Standard process</button>
   </div>
   <div class="lens-panel" data-lens="domain">
-    <div class="donut-row">{domain_donut}{domain_list}</div>
+    <div class="donut-row">{domain_donut}{domain_legend}{domain_list}</div>
   </div>
   <div class="lens-panel" data-lens="scor" hidden>
-    <div class="donut-row">{scor_donut}{scor_list}</div>
+    <div class="donut-row">{scor_donut}{scor_legend}{scor_list}</div>
     <p class="sub" style="margin-top:14px;max-width:64ch">
       <b>Transform</b> (production/manufacturing execution) is Kern's thinnest SCOR category by
       design -- Kern is a planning and decision-support engine, not a manufacturing execution
       system (MES).
     </p>
   </div>
-  <p class="muted" style="font-size:12.5px;margin-top:10px">Click a segment to see its tools. Each tool sits in exactly one bucket per lens.</p>
+  <p class="muted" style="font-size:12.5px;margin-top:10px">Click a legend entry (or a donut segment) to see its tools. Each tool sits in exactly one bucket per lens.</p>
 </section>
 
 <section>
