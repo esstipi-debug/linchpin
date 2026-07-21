@@ -16,12 +16,15 @@
     serviceLevel: 0.95,
     orderCost: 80,
     holdingRate: 0.22,
-    budget: 44000,
+    budget: 125000,
     leadOverride: {},
     exported: false,
     data: null,
     loading: true,
     error: null,
+    // Snapshot of the first successful load ("what you had in mind"), captured
+    // once so the Budget Planner can contrast any later slider move against it.
+    baseline: null,
   };
 
   var root = document.getElementById("root");
@@ -75,7 +78,19 @@
     if (state.loading) render();
     return fetch("/api/portfolio?" + query())
       .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
-      .then(function (d) { state.data = d; state.error = null; state.loading = false; render(); })
+      .then(function (d) {
+        state.data = d; state.error = null; state.loading = false;
+        if (!state.baseline) {
+          state.baseline = {
+            budget: state.budget,
+            serviceLevel: state.serviceLevel,
+            requested: d.totals.requested,
+            cycle_floor: d.totals.cycle_floor,
+            scale: d.totals.scale,
+          };
+        }
+        render();
+      })
       .catch(function (e) { state.error = e.message; state.loading = false; render(); });
   }
 
@@ -315,6 +330,61 @@
       return '<div style="display:flex;justify-content:space-between;font-size:12px"><span style="color:var(--muted)">' + label + '</span><span style="' + MONO + ";font-weight:600" + (color ? ";color:" + color : "") + '">' + value + "</span></div>";
     };
 
+    // ---- consequence panel: contrast "what you had in mind" (baseline) against
+    // the current slider position, in plain language, before committing to it ----
+    var consequence = (function () {
+      var b = state.baseline;
+      if (!b) return "";
+      var headroom = state.budget - req;
+      var baseHeadroom = b.budget - b.requested;
+      var moneySigned = function (n) { return (n < 0 ? "−" : "+") + "$" + Math.abs(Math.round(n)).toLocaleString("en-US"); };
+      var pct = function (s) { return s >= 1 ? "100%" : Math.round(s * 100) + "%"; };
+      // Dollar value of the safety-stock buffer NOT funded at the current scale
+      // (n_risk is a forecast-bias flag, independent of the budget slider --
+      // using it here would show "0 productos" even while the buffer visibly
+      // shrinks, which is what happened in testing: misleading, not a real
+      // consequence of this decision).
+      var uncovered = Math.max(0, (1 - Math.min(1, scale)) * Math.max(0, req - cycleFloor));
+      var baseUncovered = Math.max(0, (1 - Math.min(1, b.scale)) * Math.max(0, b.requested - b.cycle_floor));
+
+      var moodClass = !feasible ? "bad" : (scale >= 1 ? "good" : "warn");
+      var moodFg = { good: "var(--ok)", warn: "var(--warn)", bad: "var(--bad)" }[moodClass];
+      var moodBg = { good: "var(--ok-soft)", warn: "var(--warn-soft)", bad: "var(--bad-soft)" }[moodClass];
+      var moodBd = { good: "var(--ok-bd)", warn: "var(--warn-bd)", bad: "var(--bad-bd)" }[moodClass];
+      var moodIcon = { good: "✓", warn: "▲", bad: "✗" }[moodClass];
+      var moodTitle = moodClass === "good" ? "Con esto cubrís todo sin quedarte sin stock"
+        : moodClass === "warn" ? "Se cubre casi todo, pero no del todo"
+        : "Con esta plata no alcanza";
+      var moodSub = moodClass === "good" ? (headroom > 0 ? "Y te sobra " + moneySigned(headroom).replace("+", "") + " del presupuesto que tenías pensado." : "Justo lo que hacía falta — sin margen extra.")
+        : moodClass === "warn" ? "El colchón de seguridad queda en " + pct(scale) + " en vez de completo — subí el presupuesto a " + money(req) + " para cubrirlo del todo."
+        : "Te faltan " + money(cycleFloor - state.budget) + " para cubrir ni el mínimo de stock.";
+
+      var card = function (label, nowVal, nowColor, wasVal) {
+        return '<div style="background:var(--ink-2);border:1px solid var(--line);border-radius:11px;padding:12px 13px">' +
+          '<div style="font-size:11px;color:var(--muted);line-height:1.4;min-height:2.6em;margin-bottom:8px">' + label + "</div>" +
+          '<div style="' + MONO + ';font-size:17px;font-weight:800;color:' + nowColor + ';margin-bottom:3px">' + nowVal + "</div>" +
+          '<div style="font-size:10.5px;color:var(--faint)">tenías pensado: <b style="color:var(--txt-2)">' + wasVal + "</b></div></div>";
+      };
+
+      var uncoveredColor = uncovered === 0 ? "var(--ok)" : uncovered <= baseUncovered ? "var(--warn)" : "var(--bad)";
+      var scaleColor = scale >= 1 ? "var(--ok)" : scale >= 0.8 ? "var(--warn)" : "var(--bad)";
+      var headColor = headroom >= 0 ? "var(--ok)" : "var(--bad)";
+
+      return '<div style="border-top:1px solid var(--line);padding-top:16px;display:flex;flex-direction:column;gap:12px">' +
+        '<div style="display:flex;align-items:center;justify-content:space-between">' +
+        '<span style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-2)">◆ Consecuencia de este ajuste</span>' +
+        '<button data-action="reset-baseline" style="font-size:11px;color:var(--muted);background:transparent;border:1px solid var(--line-2);border-radius:999px;padding:5px 11px;cursor:pointer;font-family:var(--sans)">↺ Volver a lo que tenía pensado</button></div>' +
+        '<div style="border-radius:12px;padding:12px 14px;display:flex;align-items:center;gap:11px;border:1px solid ' + moodBd + ";background:" + moodBg + '">' +
+        '<span style="font-size:16px;font-weight:800;color:' + moodFg + '">' + moodIcon + "</span>" +
+        '<div style="display:flex;flex-direction:column;gap:2px"><span style="font-size:12.5px;font-weight:700;color:' + moodFg + '">' + moodTitle + "</span>" +
+        '<span style="font-size:11px;color:var(--muted)">' + moodSub + "</span></div></div>" +
+        '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">' +
+        card("Colchón sin cubrir (en plata)", money(uncovered), uncoveredColor, money(baseUncovered)) +
+        card("Colchón para demoras o picos", pct(scale), scaleColor, pct(b.scale)) +
+        card("Plata de sobra (o que falta)", moneySigned(headroom), headColor, moneySigned(baseHeadroom)) +
+        "</div></div>";
+    })();
+
     var aside = '<aside style="' + CARD + ';padding:20px;position:sticky;top:96px;display:flex;flex-direction:column;gap:20px">' +
       '<div><span style="font-size:13px;font-weight:600">Budget &amp; constraints</span><p style="margin:4px 0 0;font-size:11.5px;color:var(--muted);line-height:1.45">Lower the cap and watch each SKU\'s safety stock shrink toward its cycle-stock floor.</p></div>' +
       '<div style="display:flex;flex-direction:column;gap:9px"><div style="display:flex;justify-content:space-between;align-items:baseline">' +
@@ -326,6 +396,7 @@
       '<span style="font-size:12px;font-weight:500;color:var(--txt-2)">Service level</span>' +
       '<span data-live="serviceLevel" style="' + MONO + ';font-size:13px;font-weight:600;color:var(--accent)">' + (state.serviceLevel * 100).toFixed(1) + "%</span></div>" +
       '<input type="range" data-slider="serviceLevel" min="0.80" max="0.999" step="0.005" value="' + state.serviceLevel + '" aria-label="Service level" style="width:100%"></div>' +
+      consequence +
       '<div style="border-top:1px solid var(--line);padding-top:16px;display:flex;flex-direction:column;gap:11px">' +
       stat("Requested", money(req)) + stat("Cycle-stock floor", money(cycleFloor), "var(--bad)") +
       stat("Safety-stock scale", (scale * 100).toFixed(0) + "%", "var(--accent-bright)") + stat("Final investment", money(tot.final), "var(--ok)") + "</div>" +
@@ -426,6 +497,10 @@
     else if (a === "pill") { state.activeSkuId = t.dataset.sku; render(); }
     else if (a === "export") { state.exported = true; render(); }
     else if (a === "retry") { state.error = null; fetchData(); }
+    else if (a === "reset-baseline") {
+      if (state.baseline) { state.budget = state.baseline.budget; state.serviceLevel = state.baseline.serviceLevel; }
+      state.exported = false; fetchData();
+    }
   });
 
   root.addEventListener("keydown", function (e) {
