@@ -337,3 +337,14 @@ def test_launch_readiness_drops_offtopic_pricing_and_capacity_citations():
     assert result.kept == ()
     joined = " ".join(result.omitted)
     assert "facility_location" in joined and "capacity_planning" in joined
+
+
+def test_hats_tools_have_anchors_and_tension_exclusions():
+    """Spec Sec.10: anchors seeded from inventory_optimization (+ working capital
+    for settlement); tension excludes the two in-radius auction false friends
+    found by the 2026-07-20 BFS (PR #164 lesson)."""
+    assert TOOL_CONCEPTS["hat_tension"] == (
+        "safety_stock", "service_level", "cycle_service_level")
+    assert TOOL_CONCEPTS["hat_settlement"] == (
+        "safety_stock", "service_level", "working_capital_efficiency")
+    assert set(EXCLUDED_CONCEPTS["hat_tension"]) == {"reverse_auction", "procurement_auction"}

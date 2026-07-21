@@ -256,6 +256,10 @@ TOOL_TITLES: dict[str, dict[Lang, str]] = {
     "price_watch": {"es": "Vigilancia de Precios Asistida por Descubrimiento",
                      "en": "Discovery-Assisted Price Watch"},
     "launch_readiness": {"es": "Preparacion para el Lanzamiento", "en": "Launch Readiness"},
+    "hat_tension": {"es": "Mapa de Tension de Decision (Reabastecimiento)",
+                     "en": "Decision Tension Map (Replenishment)"},
+    "hat_settlement": {"es": "Plan de Reabastecimiento Reconciliado",
+                        "en": "Reconciled Replenishment Plan"},
 }
 
 

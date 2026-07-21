@@ -24,6 +24,7 @@ from jobs import (
     fefo_job,
     financial_kpis_job,
     forecast_job,
+    hats_job,
     intake,
     inventory_deliverable,
     landed_cost_job,
@@ -1004,6 +1005,91 @@ def launch_readiness_tool() -> Tool:
         ).write_all(out_dir),
         # The verdict IS a set of ranked, executable choices -> surface them as the guided outcome.
         options=tool_options.launch_readiness_options,
+    )
+
+
+# ---- hats: N4 tension + N5 settlement (two tools, ONE shared job - D6) -------
+
+def _hats_prepare(request: JobRequest, provider: LLMProvider) -> Prepared:
+    """Shared by both hat tools. Param problems (weights / wacc / sl_target) are
+    needs_clarification; missing or unusable data is needs_data."""
+    try:
+        hats_job.config_from_params(request.params)
+        hats_job.parse_request_weights(request.params)
+    except ValueError as exc:
+        return Prepared(status="needs_clarification", messages=[str(exc)])
+    if not request.data_path:
+        return Prepared(status="needs_data", messages=[
+            "a weekly demand CSV (product_id, quantity, unit_cost, lead_time_days) is required"])
+    try:
+        payload = hats_job.prepare(request.data_path, request.params)
+    except (ValueError, FileNotFoundError) as exc:
+        return Prepared(status="needs_data", messages=[str(exc)])
+    return Prepared(status="ok", payload=payload)
+
+
+def _hat_tension_run(payload: object, params: dict) -> Produced:
+    report = hats_job.run_tension(payload)
+    return Produced(report=report, summary=report.summary)
+
+
+def _hat_settlement_run(payload: object, params: dict) -> Produced:
+    report = hats_job.run_settlement(payload)
+    return Produced(report=report, summary=report.summary)
+
+
+def hat_tension_tool() -> Tool:
+    return Tool(
+        key="hat_tension",
+        title="Decision Tension Map (Replenishment)",
+        description="Score one replenishment decision (order quantity + service level) through "
+                    "4 role hats (comprador / planner / cfo / comercial) and render the "
+                    "disagreement as ranked options with the $ gaps. The human resolves - "
+                    "nothing is reconciled or executed here.",
+        intent_keywords=(
+            "mapa de tension", "tension entre areas", "conflicto compras finanzas",
+            "trade-off entre roles", "perspectivas de la decision", "decision tension map",
+            "cuanto pedir segun cada area",
+        ),
+        requires_data=True,
+        prepare=_hats_prepare,
+        run=_hat_tension_run,
+        qa=lambda report: hats_job.verify_tension(report),
+        deliver=lambda report, out_dir, client: hats_job.write_tension(report, out_dir, client),
+        deck=lambda report, out_dir, client, citations, confidence, options: replace(
+            hats_job.build_tension_deck(report, client=client, citations=tuple(citations),
+                                        confidence=confidence),
+            options=tuple(options),
+        ).write_all(out_dir),
+        # The job already assembled the protected OPTIONS outcome (never EXECUTED).
+        options=lambda report: report.outcome,
+    )
+
+
+def hat_settlement_tool() -> Tool:
+    return Tool(
+        key="hat_settlement",
+        title="Reconciled Replenishment Plan",
+        description="Reconcile the 4 role hats into ONE replenishment plan (Q*, SL*) via the "
+                    "operator's explicit weight policy, with a concession record (acta) and the "
+                    "signed $ value vs today's baseline. Ends in a human HANDOFF - never applies "
+                    "anything.",
+        intent_keywords=(
+            "plan reconciliado", "reconciliar la decision", "acta de concesiones",
+            "decision unica ponderada", "reconciled order plan", "consenso ponderado de compra",
+        ),
+        requires_data=True,
+        prepare=_hats_prepare,
+        run=_hat_settlement_run,
+        qa=lambda report: hats_job.verify_settlement(report),
+        deliver=lambda report, out_dir, client: hats_job.write_settlement(report, out_dir, client),
+        deck=lambda report, out_dir, client, citations, confidence, options: replace(
+            hats_job.build_settlement_deck(report, client=client, citations=tuple(citations),
+                                           confidence=confidence),
+            options=tuple(options),
+        ).write_all(out_dir),
+        # The job already assembled the protected HANDOFF outcome (never EXECUTED).
+        options=lambda report: report.outcome,
     )
 
 
@@ -2423,4 +2509,6 @@ def build_default_registry() -> ToolRegistry:
     reg.register(price_intelligence_tool())
     reg.register(price_watch_tool())
     reg.register(launch_readiness_tool())
+    reg.register(hat_tension_tool())
+    reg.register(hat_settlement_tool())
     return reg
