@@ -20,9 +20,13 @@ export PATH="$LOCAL_BIN:$PATH"
 
 # -- 1. dependencies -- the remote container starts fresh; locally the developer
 #       owns their own venv, so only auto-install in the web environment.
+#       Delegate to scripts/setup-test-env.sh: a plain `pip install -r` here
+#       aborts the WHOLE transaction (leaving zero packages installed) when the
+#       extruct/jstyleson wheel can't build against the container's old
+#       setuptools, or when a heavy extra tries to upgrade a Debian-managed
+#       package pip can't uninstall. The script fixes both; see its header.
 if [ "${CLAUDE_CODE_REMOTE:-}" = "true" ]; then
-  python -m pip install -q --upgrade pip >/dev/null 2>&1 || true
-  pip install -q -r "$PROJECT_DIR/requirements-dev.txt" >/dev/null 2>&1 || true
+  KERN_SETUP_QUIET=1 bash "$PROJECT_DIR/scripts/setup-test-env.sh" >/dev/null 2>&1 || true
 fi
 
 # -- 2. persist env for the session's later shells (tests use PYTHONPATH=.) --

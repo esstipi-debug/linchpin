@@ -194,4 +194,8 @@ See [`knowledge/graph-memory/README.md`](knowledge/graph-memory/README.md).
 
 `HANDOFF.md` (session-to-session context) · `README.md` (full overview) ·
 `scm_agent/README.md` (agent reference) · `documentation/METHODOLOGY.md` (models) ·
-`documentation/operator/` (the human operator's portfolio).
+`documentation/operator/` (the human operator's portfolio) ·
+[`documentation/TESTING_ENVIRONMENT.md`](documentation/TESTING_ENVIRONMENT.md)
+(stand up a clean env + `examples/run_capability_smoke.py` to exercise all 41
+tools and see where each fails; `scripts/setup-test-env.sh` for the reproducible
+full install the `SessionStart` hook now delegates to).
