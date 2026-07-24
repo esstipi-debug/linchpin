@@ -2,6 +2,18 @@
 into a real, populated ``jobs.scheduler.JobRegistry`` for the cron-triggered
 ``POST /api/jobs/run-scheduled`` endpoint (``webapp/app.py``).
 
+Note on the Control Tower monitors: ``jobs.monitors_job.MONITORS_JOB`` is a
+registrable sense-cycle job, but it is deliberately NOT added here. The
+``POST /api/jobs/run-scheduled`` endpoint already runs
+``scm_agent.monitors.run_all_monitors`` INLINE on every tick (feeding it the
+price-signal events the two price jobs emit), so the inventory monitors
+already sense in production on the price-cron cadence. Adding MONITORS_JOB to
+this list would double-run the monitors AND break the endpoint's price-shaped
+report contract (``outcomes``/``pairs_checked``/``events`` -- which
+``MonitorsCycleReport`` does not have). MONITORS_JOB exists for a future
+DEDICATED monitors cron on the monitors' own cadence, driven separately from
+the price endpoint.
+
 Why this module exists, not a change to ``jobs/scheduler.py`` itself:
 ``jobs.scheduler.default_registry()`` ships intentionally EMPTY (F0, PR-3) --
 ``scheduler.py`` is the generic scheduling primitive and must not import any
