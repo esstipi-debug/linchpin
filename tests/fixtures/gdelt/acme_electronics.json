@@ -1,0 +1,7 @@
+{"articles": [
+  {"url": "https://example-news.com.br/greve-porto-santos", "url_mobile": "", "title": "Greve no Porto de Santos afeta fornecedor Acme Electronics", "seendate": "20260722T093000Z", "socialimage": "", "domain": "example-news.com.br", "language": "Portuguese", "sourcecountry": "Brazil"},
+  {"url": "https://logistics-daily.com/acme-shipment-delay", "url_mobile": "", "title": "Port strike stalls Acme Electronics container shipments", "seendate": "20260721T140000Z", "socialimage": "", "domain": "logistics-daily.com", "language": "English", "sourcecountry": "United States"},
+  {"url": "https://mercado-news.com.ar/incendio-planta-acme", "url_mobile": "", "title": "Incendio en planta proveedora de Acme Electronics", "seendate": "20260715T080000Z", "socialimage": "", "domain": "mercado-news.com.ar", "language": "Spanish", "sourcecountry": "Argentina"},
+  {"url": "https://trade-wire.com/acme-power-outage", "url_mobile": "", "title": "Power outage halts Acme Electronics production line", "seendate": "20260710T113000Z", "socialimage": "", "domain": "trade-wire.com", "language": "English", "sourcecountry": "United States"},
+  {"url": "https://asia-supply.com/acme-flood", "url_mobile": "", "title": "Flood disrupts Acme Electronics supplier operations", "seendate": "20260705T090000Z", "socialimage": "", "domain": "asia-supply.com", "language": "English", "sourcecountry": "United States"}
+]}

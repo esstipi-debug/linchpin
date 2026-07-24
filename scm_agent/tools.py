@@ -16,6 +16,7 @@ from jobs import (
     dea_job,
     deliverables,
     digital_twin_job,
+    disruption_scan_job,
     drp_job,
     earned_value_job,
     excel_replenishment_job,
@@ -1139,6 +1140,64 @@ def risk_tool() -> Tool:
         ).write_all(out_dir),
         # The mitigation decision IS a set of ranked, executable choices -> surface them as
         # the guided OPTIONS outcome on success (recommended default flagged).
+        options=lambda report: report.outcome,
+    )
+
+
+# ---- disruption_scan (GDELT supplier disruption exposure screen) -------------
+
+def _disruption_scan_prepare(request: JobRequest, provider: LLMProvider) -> Prepared:
+    if not request.data_path:
+        return Prepared(
+            status="needs_data",
+            messages=["a supplier-list CSV (supplier, optional country / annual_spend) is required"],
+        )
+    try:
+        rows = disruption_scan_job.prepare(request.data_path, request.params)
+    except (ValueError, FileNotFoundError) as exc:
+        return Prepared(status="needs_data", messages=[str(exc)])
+    if not rows:
+        return Prepared(status="needs_data", messages=["no suppliers found in the data"])
+    return Prepared(status="ok", payload=rows)
+
+
+def _disruption_scan_run(payload: object, params: dict) -> Produced:
+    # fetcher/timespan are injectable seams: tests and the offline demo pass a
+    # canned fetcher; production leaves fetcher=None so the throttled stdlib GET runs.
+    report = disruption_scan_job.run(
+        payload,
+        fetcher=params.get("fetcher"),
+        timespan=params.get("timespan", "3m"),
+    )
+    return Produced(report=report, summary=report.summary)
+
+
+def disruption_scan_tool() -> Tool:
+    return Tool(
+        key="disruption_scan",
+        title="Supplier Disruption Exposure Scan",
+        description="Screen a supplier list against live GDELT disruption news (strikes, disasters, "
+                    "port/logistics incidents, bankruptcies, shortages), score each supplier's "
+                    "exposure, and route the signal through the risk engine into a ranked "
+                    "'investigate first' plan. Read-only; needs only a supplier list, no client "
+                    "system access. The signal is a screen, not a calibrated probability.",
+        intent_keywords=(
+            "supplier disruption", "disruption exposure", "disruption scan", "supplier risk scan",
+            "disruption news", "supplier news monitoring", "supply chain disruption news",
+            "supplier exposure scan", "escaneo de disrupcion", "monitoreo de proveedores",
+            "exposicion a disrupcion", "disrupcion de proveedores",
+        ),
+        requires_data=True,
+        prepare=_disruption_scan_prepare,
+        run=_disruption_scan_run,
+        qa=lambda report: disruption_scan_job.verify(report),
+        deliver=lambda report, out_dir, client: disruption_scan_job.write_operational(report, out_dir, client),
+        deck=lambda report, out_dir, client, citations, confidence, options: replace(
+            disruption_scan_job.build_deck(report, client=client, citations=tuple(citations), confidence=confidence),
+            options=tuple(options),
+        ).write_all(out_dir),
+        # The scan's recommendation IS a set of ranked, executable "investigate X" choices
+        # (or an EXECUTED all-clear / HANDOFF retry) -> surface it as the guided outcome.
         options=lambda report: report.outcome,
     )
 
@@ -2484,6 +2543,7 @@ def build_default_registry() -> ToolRegistry:
     reg.register(queuing_tool())
     reg.register(scheduling_tool())
     reg.register(risk_tool())
+    reg.register(disruption_scan_tool())
     reg.register(forecast_tool())
     reg.register(data_quality_tool())
     reg.register(dea_tool())

@@ -220,6 +220,8 @@ TOOL_TITLES: dict[str, dict[Lang, str]] = {
     "queuing": {"es": "Colas / Dotacion de Personal", "en": "Queuing / Staffing"},
     "scheduling": {"es": "Secuenciacion de Trabajos", "en": "Job Sequencing"},
     "risk": {"es": "Evaluacion de Riesgo de Cadena de Suministro", "en": "Supply-Chain Risk Assessment"},
+    "disruption_scan": {"es": "Escaneo de Exposicion a Disrupcion de Proveedores",
+                        "en": "Supplier Disruption Exposure Scan"},
     "forecast": {"es": "Pronostico de Demanda y Pronosticabilidad",
                  "en": "Demand Forecasting & Forecastability"},
     "data_quality": {"es": "Calidad de Datos y Maestro de SKUs (MDM)", "en": "Data Quality & SKU Master (MDM)"},

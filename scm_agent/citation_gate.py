@@ -73,6 +73,10 @@ TOOL_CONCEPTS: dict[str, tuple[str, ...]] = {
     "queuing": ("mm1_queue", "md1_queue", "queuing_analysis", "queue_server_optimization"),
     "scheduling": ("dispatching_rules", "vollmann_spt", "vollmann_edd", "johnsons_rule"),
     "risk": ("atomic_holistic_risk", "collaborative_risk_mitigation"),
+    # disruption_scan grounds the GDELT news screen on disruption/resilience theory
+    # (distinct from the risk tool's mitigation anchors). Deliberately disruption-
+    # specific concept nodes, not the broad supply_chain_risk hub.
+    "disruption_scan": ("supply_chain_disruption", "supply_chain_resilience", "disruption_forecasting"),
     "forecast": ("forecastability", "crostons_method", "sbc_classification", "syntetos_boylan_approximation", "tsb_method"),
     # No topically-better node exists in the committed graph for SKU-master/
     # GTIN data quality (verified during the 2026-07 adversarial review) - this
