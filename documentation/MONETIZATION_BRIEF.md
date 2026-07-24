@@ -122,6 +122,87 @@ puntual, no como MRR. Techo por cuenta a lo largo de su ciclo de vida (Diagnóst
 → Scale → Retainer Ejecutivo + proyectos anuales): **$150.000–250.000+/año** en la cuenta
 más grande y madura de la cartera.
 
+### Peldaños de entrada self-serve — Kern Alerts y Chequeo Stocky (addendum #2, 24-jul-2026)
+
+> Consolida el catálogo v2 diseñado en conversación. Añade **debajo** del
+> Diagnóstico de Arranque dos peldaños de menor fricción que alimentan la
+> escalera existente, sin tocar sus precios. Fuente de verdad de los tiers
+> pagos: `scm_agent/package_specs.py` (si prosa y código discrepan, gana el
+> código).
+
+**Principio rector (regla de diseño de cualquier SKU futuro): el precio sube
+donde hay una persona pensando, no solo código corriendo.** La escalera son dos
+categorías de negocio distintas separadas por una frontera nítida —
+**sugerencia vs. ejecución**:
+
+- **Software que corre solo** (Kern Alerts): precio de app store, costo marginal
+  ≈ 0. Calcula el número y lo muestra; el comerciante decide y carga. Autonomía
+  T1 (solo notifica), nunca escribe.
+- **Software + criterio humano** (Diagnóstico hacia arriba): precio de servicio.
+  Hay una persona que revisa, aprueba y cubre las excepciones. Kern ejecuta
+  (PO staged, writeback) con gate de aprobación. Es la razón por la que Growth
+  vale 20× Alerts — y por la que se puede cobrar eso.
+
+| # | Producto (nuevo) | Precio USD | Tipo | Estado |
+|---|---|---|---|---|
+| A | **Kern Alerts** | $49/mes (≤1.000 SKUs, 1 ubic.) · $99/mes (≤5.000 SKUs, multi) | 100% software, T1 | Por fases (ver abajo) — **embudo, no ingreso principal** |
+| B | **Chequeo de migración Stocky** | $350–400 fijo, una vez | Servicio productizado liviano | **Vendible ya**; landing `/stocky-alternative` LIVE en prod (PR #163); ventana muere 31-ago-2026 |
+
+**Kern Alerts — alcance v1 (líneas rojas que protegen la escalera):** exactamente
+los 3 monitores de inventario cableados a routing (`config/event_routing.yaml`) —
+`rop_breach`, `stockout_projected`, `excess_growing` — con cantidad sugerida y
+disclaimer obligatorio en cada alerta (*"Sugerencia calculada — verificá antes de
+ordenar"*). **No incluye** ejecución/writeback, revisión humana, manejo de
+excepciones, ni S&OP/Kraljic/multi-echelon/red (nunca bajan a este peldaño).
+Ancla directa: Genie ($59/99/159); centro de la categoría, no el piso.
+
+**Unit economics (por qué es embudo):** igualar 1 Growth-piso ($1.500) ≈ 20
+clientes Alerts; 1 Scale ≈ 43. El SaaS de ticket bajo necesita 50–80 clientes
+para reemplazar el modelo retainer — inviable como negocio principal de un
+operador solo. Se justifica **solo si la conversión al peldaño siguiente es
+real**: por eso las fases miden conversión, no instalaciones.
+
+**Roadmap con criterios de corte (no construir la app antes de tener pagadores):**
+
+| Fase | Qué | Criterio de avance | Criterio de kill |
+|---|---|---|---|
+| 0 | Chequeo Stocky, manual, sin desarrollo | ≥5 chequeos vendidos | 0 ventas con ≥300 contactos → matar el ángulo Shopify |
+| 1 | Alerts **concierge**: merchant sube CSV, corridas con los monitores, email semiautomático | ≥10 pagando a 60–90 días, churn <10%/mes, ≥1 conversión a Starter | <5 pagando → no construir la app |
+| 2 | La app real (conector Shopify multi-tenant + billing + listing) | Decisión separada con números de Fase 1 en mano | — |
+
+**Comparables Shopify App Store (verificados 23-jul-2026):** Assisty desde $19 ·
+Prediko $49→$349 · Sumtracker $49 (Replenish $99) · **Genie $59/99/159 (ancla)** ·
+Qoblex $99–149 · — salto a cotización — Inventory Planner ~$245 · Cin7 Core
+$349+. Hay un valle entre ~$159 (techo self-serve) y ~$245+ (piso cotización):
+Starter LatAm ($250–300) cae justo en ese borde (primer peldaño con humano);
+Alerts ($49–99) se planta en el centro de la categoría self-serve. No competimos
+en precio contra Assisty $19 — competimos en **rigor del cálculo** (σ de error de
+forecast vs. promedios móviles) y en un **camino de upgrade a servicio humano**
+que ninguna app ofrece.
+
+**Estado de implementación (reconciliado contra el código, 24-jul-2026):**
+
+- **Ya en producción:** los 3 monitores + dedup por `EventLedger`; el endpoint
+  `POST /api/jobs/run-scheduled` ya corre `run_all_monitors` inline en cada tick
+  (los monitores **ya sensan en prod**, acoplados al cron de precios).
+- **Este PR (feat/kern-alerts-concierge):** entrega merchant-facing
+  (`scm_agent/merchant_alerts.py` — render con qty sugerida + disclaimer, T1,
+  puro, cero writeback) + runner concierge Fase-1
+  (`jobs/monitors_job.py::run_concierge_alerts`) + `MONITORS_JOB` listo para un
+  cron dedicado. Cierra el gap de delivery que faltaba para la Fase 1.
+- **Sigue faltando (el salto multi-tenant de Fase 2, el riesgo real):** conector
+  Shopify read-only **multi-tenant** + OAuth + Shopify Billing API + onboarding
+  self-serve + listing "Built for Shopify". Un conector Shopify de inventario
+  (`src/connectors/shopify_inventory.py`) está en WIP de sesión paralela, pero es
+  writeback single-operator, no la capa multi-tenant. **Fase 2 es una decisión
+  separada, con presupuesto propio.**
+
+**Riesgo principal (el mismo del brief):** perseguir MRR de Alerts como meta
+principal repite el error que este brief ya descartó (50–80 clientes). Alerts lo
+esquiva tratándose como embudo con criterios de corte. Canibalización de un
+Starter hacia Alerts: improbable — Alerts no ejecuta, no revisa, no cubre
+excepciones (la frontera sugerencia/ejecución es la protección).
+
 ### Nota — Sección 10: vertical de auditoría (comprador distinto, mayor poder de precio)
 
 Por qué se añade y por qué mueve el techo: las secciones 1–7 le venden al **comprador de
