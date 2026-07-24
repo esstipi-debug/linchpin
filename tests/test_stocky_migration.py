@@ -22,12 +22,24 @@ def _full_batch() -> StockyMigrationBatch:
     return batch
 
 
-def test_shopify_native_does_not_cover_the_stocky_layer():
-    # Grounding constant: none of the Stocky-added categories are native.
+def test_stocky_layer_does_not_migrate_cleanly_to_native():
+    # Grounding constant: each Stocky-added category is a MIGRATION gap
+    # (covered=False) with a stated reason. Native may have a basic version of
+    # some of these (e.g. basic POs) -- the gap is that the Stocky data/
+    # automation does not carry over cleanly, not that native is featureless.
     for category in ("reorder_points", "purchase_orders", "suppliers", "demand_forecasting"):
         covered, reason = SHOPIFY_NATIVE_COVERAGE[category]
         assert covered is False
         assert reason  # a stated reason exists for every verdict
+
+
+def test_purchase_orders_reason_does_not_overclaim_native_lacks_pos():
+    # Regression guard: native DOES have basic purchase orders. The reason must
+    # acknowledge that (say "SI ... basicas") and pin the gap on the lossy
+    # migration, not claim native has no POs at all.
+    _, reason = SHOPIFY_NATIVE_COVERAGE["purchase_orders"]
+    assert "no gestiona ordenes de compra" not in reason  # the old overclaim
+    assert "perdida" in reason or "draft" in reason
 
 
 def test_full_batch_verdict_is_not_sufficient_and_lists_gaps():

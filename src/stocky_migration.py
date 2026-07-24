@@ -8,14 +8,16 @@ answers it honestly.
 
 The whole assessment is grounded in ONE explicit, auditable constant --
 :data:`SHOPIFY_NATIVE_COVERAGE` -- so every "this migrates cleanly" / "this is
-a gap" verdict traces to a stated fact about what Shopify native does and does
-not do, never to prose invented per run. Shopify native tracks stock
-quantities per location; it does NOT manage purchase orders, supplier records,
-min/max reorder automation, or demand forecasting -- exactly the layer Stocky
-added on top, and exactly the layer Kern replaces. The honest verdict is
-therefore usually "native alone does not replace Stocky", which is precisely
-the concrete hook to Starter / the full Diagnostico -- sold as a fact the
-merchant can verify, never as a scare.
+a gap" verdict traces to a stated fact, never to prose invented per run. The
+honest framing matters: Shopify native is NOT featureless -- it now offers
+basic purchase-order creation/receiving and a single supplier Vendor field. The
+gap is about MIGRATION, not feature presence: suppliers can't be exported from
+Stocky, a native PO CSV import only creates draft line items (no past statuses,
+received quantities, or supplier links), and native has no automated reorder
+points and no demand forecasting (verified against Shopify's own transition
+guide). Those concrete losses -- not a made-up "native does nothing" -- are the
+hook to Starter / the full Diagnostico, sold as facts the merchant can verify,
+never as a scare.
 
 Pure functions over a parsed ``jobs.stocky_importer.StockyMigrationBatch``: no
 IO, no network, no Shopify API. The merchant provides CSV exports; this reads
@@ -33,26 +35,39 @@ from jobs.stocky_importer import StockyMigrationBatch
 # native inventory (no third-party app) covers a given Stocky data category,
 # and the stated reason. Auditable and easy to correct in one place if
 # Shopify's native feature set changes.
+# The bool = does this Stocky-provided capability/data MIGRATE cleanly to
+# Shopify native? (False = gap.) NOT "does native have the feature at all" --
+# native DOES have a basic version of several of these now; the point of a
+# MIGRATION check is whether your Stocky data/automation carries over, and for
+# all four below it does not (verified against Shopify's own transition guide,
+# help.shopify.com/en/manual/products/inventory/transitioning-from-stocky, and
+# the native purchase-orders help page). Reasons state honestly what native
+# DOES have before naming the concrete loss -- an overclaim a merchant can
+# refute in 30 seconds would kill the "honest verdict" the check is sold on.
 SHOPIFY_NATIVE_COVERAGE: dict[str, tuple[bool, str]] = {
     "reorder_points": (
         False,
-        "Shopify nativo no automatiza puntos de reorden min/max: solo muestra la cantidad "
-        "en stock. La logica de cuando/cuanto reponer es lo que agregaba Stocky.",
+        "Shopify nativo muestra la cantidad en stock pero NO recrea el punto de reorden "
+        "automatico de Stocky (calculado por lead time x ventas/dia): esa automatizacion "
+        "de cuando/cuanto reponer se pierde en la migracion.",
     ),
     "purchase_orders": (
         False,
-        "Shopify nativo no gestiona ordenes de compra ni su historial (recibido vs pedido, "
-        "costo por unidad). Esa capa la aportaba Stocky.",
+        "Shopify nativo SI crea y recibe ordenes de compra basicas, pero migrar desde Stocky "
+        "es con perdida: el import CSV solo crea lineas en una OC draft y NO trae estados de "
+        "OC pasados, cantidades recibidas ni el vinculo a proveedor (help.shopify.com, guia "
+        "de transicion de Stocky).",
     ),
     "suppliers": (
         False,
-        "Shopify nativo no guarda registros de proveedor (lead time, MOQ, contacto) ligados "
-        "al inventario. Se pierden en la migracion a nativo.",
+        "Los proveedores NO se pueden exportar de Stocky, y el nativo solo tiene un campo "
+        "Vendor por producto: multiples proveedores, lead times, MOQs y case packs se pierden "
+        "o requieren metafields.",
     ),
     "demand_forecasting": (
         False,
-        "Shopify nativo no pronostica demanda ni sugiere cantidades de reorden basadas en "
-        "historial. Requiere una herramienta como Kern con tu historial de ventas.",
+        "Shopify nativo (fuera de Stocky) no pronostica demanda ni sugiere cantidades de "
+        "reorden basadas en historial. Requiere una herramienta con tu historial de ventas.",
     ),
 }
 
