@@ -36,6 +36,10 @@ graphify-out/
 knowledge/scm-books-rebuild/
 knowledge/scm-books/graph.json.bak
 knowledge/scm-books/graph.cluster.bak
+# Graph RAG caches (regenerated on KnowledgeBase init with the [rag] extra;
+# embeddings_cache.json is ~25 MB of per-node vectors)
+knowledge/embeddings_cache.json
+knowledge/community_summaries.json
 
 # generated client deliverables
 deliverables/
