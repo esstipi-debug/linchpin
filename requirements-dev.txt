@@ -36,3 +36,8 @@ splink>=4
 statsmodels>=0.14
 # jobs/seo_audit.py's real site crawl (S1, PR-22) — mirrors pyproject [seo]
 advertools>=0.14
+# NOTE: pyproject [rag] (fastembed, semantic discovery) is DELIBERATELY excluded
+# here. Installing it makes every KnowledgeBase() init embed all books nodes
+# (model download + compute) — a per-run CI cost for a purely opt-in operator
+# feature. The RAG tests skipif(not _has_fastembed()); CI exercises the keyword
+# fallback path. Install locally with `pip install .[rag]` to run them.
