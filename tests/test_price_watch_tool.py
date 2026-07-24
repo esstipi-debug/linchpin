@@ -162,7 +162,7 @@ def test_registry_now_has_45_tools():
     # hat_tension_tool() + hat_settlement_tool() (41 -> 43, this branch) -> 45.
     # bump this count again the next time a tool is registered, same as every prior update.
     reg = tools.build_default_registry()
-    assert len(reg.list()) == 45
+    assert len(reg.list()) == 46
 
 
 def test_scm_agent_tools_module_imports_without_circular_import():
